@@ -97,7 +97,105 @@
 		return data.exception || data.message || "";
 	}
 
+	// ------------------------------------------------------------------ guest mode (no account)
+	// With "Sign-up not required" on, a guest's readers and progress live in this browser only.
+
+	const GUEST_METHODS = new Set(["save_reader", "delete_reader", "get_progress", "start_session", "finish_session", "session_feedback"]);
+
+	function guestDb() {
+		if (!S.guestDb) {
+			let stored = null;
+			try { stored = JSON.parse(localStorage.getItem("es_reading_guest") || "null"); } catch (e) { /* storage unavailable */ }
+			S.guestDb = Object.assign({ readers: [], sessions: [] }, stored || {});
+		}
+		return S.guestDb;
+	}
+
+	function guestSave() {
+		try { localStorage.setItem("es_reading_guest", JSON.stringify(S.guestDb)); } catch (e) { /* kept in memory for this visit */ }
+	}
+
+	function guestApi(method, args) {
+		const db = guestDb();
+		const d = S.boot.defaults;
+		const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+		const session = () => db.sessions.find((x) => x.name === args.session);
+		if (method === "save_reader") {
+			const data = JSON.parse(args.data);
+			let reader = db.readers.find((r) => r.name === data.name);
+			if (!reader) {
+				if (db.readers.length >= d.max_readers) throw new Error(`You can have up to ${d.max_readers} readers.`);
+				reader = { name: "GUEST-" + Date.now() };
+				db.readers.push(reader);
+			}
+			const name = String(data.reader_name || "").replace(/[<>]/g, "").trim().slice(0, 40);
+			if (!name) { if (!reader.reader_name) db.readers.pop(); throw new Error("Please give the reader a name."); }
+			Object.assign(reader, {
+				reader_name: name,
+				avatar: String(data.avatar || "").slice(0, 8),
+				voice_country: S.boot.countries.includes(data.voice_country) ? data.voice_country : "",
+				voice_gender: ["Female", "Male"].includes(data.voice_gender) ? data.voice_gender : "",
+				voice_name: String(data.voice_name || "").slice(0, 140),
+				speech_rate: clamp(parseFloat(data.speech_rate) || d.speech_rate, 0.5, 1.5),
+				lines_per_turn: clamp(parseInt(data.lines_per_turn, 10) || d.lines_per_turn, 1, 40),
+				silence_seconds: clamp(parseInt(data.silence_seconds, 10) || d.silence_seconds, 2, 20),
+				gap_percent: clamp(parseInt(data.gap_percent, 10) || d.gap_percent, 5, 300),
+			});
+			guestSave();
+			return Object.assign({}, reader);
+		}
+		if (method === "delete_reader") {
+			db.readers = db.readers.filter((r) => r.name !== args.name);
+			db.sessions = db.sessions.filter((x) => x.reader !== args.name);
+			guestSave();
+			return { ok: true };
+		}
+		if (method === "get_progress") {
+			return db.sessions.filter((x) => x.reader === args.reader && x.status === "Completed").reverse();
+		}
+		if (method === "start_session") {
+			const row = { name: "GS-" + Date.now(), reader: args.reader, book: args.book, book_title: S.book ? S.book.title : args.book, mode: args.mode, status: "In Progress" };
+			db.sessions.push(row);
+			db.sessions = db.sessions.slice(-60);
+			guestSave();
+			return { name: row.name };
+		}
+		if (method === "finish_session") {
+			const row = session();
+			if (!row) throw new Error("That session was not found on this device.");
+			const data = JSON.parse(args.data);
+			const reader = db.readers.find((r) => r.name === row.reader) || {};
+			const rs = Number(data.reader_seconds) || 0;
+			const ns = Number(data.narrator_seconds) || 0;
+			const words = Number(data.words_total) || 0;
+			const helped = (data.helped_words || []).map(String);
+			const gap = rs && ns ? ((rs - ns) / ns) * 100 : 0;
+			const threshold = reader.gap_percent || d.gap_percent;
+			Object.assign(row, {
+				status: "Completed", completed_on: new Date().toISOString().slice(0, 10), reader_seconds: rs, narrator_seconds: ns,
+				gap_percent: gap, words_total: words, words_helped: helped.length, helped_words: helped.join(", "),
+				reader_wpm: words && rs ? (words / rs) * 60 : 0,
+			});
+			guestSave();
+			return {
+				name: row.name, reader_seconds: rs, narrator_seconds: ns, gap_percent: Math.round(gap * 10) / 10, threshold,
+				suggest_practice: Boolean(rs && ns && gap > threshold), words_total: words, words_helped: helped.length,
+				reader_wpm: Math.round(row.reader_wpm), narrator_wpm: words && ns ? Math.round((words / ns) * 60) : 0,
+			};
+		}
+		if (method === "session_feedback") {
+			const row = session() || {};
+			const n = row.words_helped || 0;
+			const feedback = row.mode === "Listen" ? "Lovely listening! Next time, try reading it together."
+				: n === 0 ? "Wonderful reading! You read every word by yourself."
+				: n <= 3 ? `Great reading! You only needed help with ${n} word${n === 1 ? "" : "s"}.`
+				: "Well done for finishing! The tricky words get easier every time you practise.";
+			return { feedback };
+		}
+	}
+
 	async function api(method, args, post) {
+		if (S.guest && GUEST_METHODS.has(method)) return guestApi(method, args || {});
 		let url = "/api/method/es_reading.api." + method;
 		const options = { headers: { "Accept": "application/json", "X-Frappe-CSRF-Token": CFG.csrf }, credentials: "same-origin" };
 		if (args instanceof FormData) {
@@ -390,6 +488,8 @@
 
 	async function start() {
 		S.boot = await api("get_bootstrap");
+		S.guest = Boolean(S.boot.guest);
+		if (S.guest) S.boot.readers = guestDb().readers;
 		S.voices = await loadVoices();
 		const remembered = localStorage.getItem("es_reading_reader");
 		S.reader = S.boot.readers.find((r) => r.name === remembered) || null;
@@ -534,6 +634,7 @@
 		const notices = [];
 		const v = currentVoice();
 		if (v.note) notices.push(v.note);
+		if (S.guest) notices.push(h("span", {}, "You're reading as a guest. Readers and progress are saved on this device only. ", h("a", { href: "/login?redirect-to=/reading" }, "Sign in"), " to keep them on your account."));
 		if (!SR) notices.push("This browser can't listen to reading aloud. Chrome, Edge or Safari can. You can still read along and tap any word to hear it.");
 		show(
 			h("div", { class: "bar" },

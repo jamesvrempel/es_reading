@@ -9,12 +9,15 @@ no_cache = 1
 
 
 def get_context(context):
-	if frappe.session.user == "Guest":
+	guest = frappe.session.user == "Guest"
+	if guest and not cint(frappe.db.get_single_value("ES Reading Settings", "allow_guests")):
 		frappe.local.flags.redirect_location = "/login?redirect-to=/reading"
 		raise frappe.Redirect(302)
 	context.no_cache = 1
-	context.csrf_token = frappe.sessions.get_csrf_token()
-	frappe.db.commit()
+	context.csrf_token = ""
+	if not guest:
+		context.csrf_token = frappe.sessions.get_csrf_token()
+		frappe.db.commit()
 	context.app_version = __version__
 	context.update(site_menu())
 	return context
@@ -63,6 +66,9 @@ def site_menu():
 	out["site_favicon"] = settings.get("favicon") or ""
 
 	user = frappe.session.user
+	out["site_user"] = None
+	if user == "Guest":
+		return out
 	full_name = frappe.utils.get_fullname(user) or user
 	out["site_user"] = {
 		"full_name": full_name,

@@ -46,7 +46,8 @@ Uninstalling deletes the books, readers and sessions on that site.
 Then open **ES Reading Settings** in the Desk:
 
 1. Paste a Claude API key and press **Test Claude connection**.
-2. Check the defaults for new readers (lines per turn, silence before help, time gap, voice).
+2. Decide whether to tick **Sign-up not required**, which opens `/reading` to visitors without an account.
+3. Check the defaults for new readers (lines per turn, silence before help, time gap, voice).
 
 The Desk has an **ES Reading** workspace (visible to System Managers and Reading Librarians) with
 shortcuts to the app, books, readers and sessions, four number cards, a weekly sessions chart and
@@ -63,6 +64,7 @@ To make `/reading` the site's front page, set **Website Settings → Home Page**
 | Who | How they get access | What they can do |
 | --- | --- | --- |
 | Family | Any signed-in user (for example an approved ES Signup account). No role needed. | Add their own readers, read books, see their own children's progress. |
+| Guest | Only when **Sign-up not required** is ticked in ES Reading Settings | Read the published books. Readers and progress are kept in that browser only, never on the server; feedback is the standard text rather than Claude's. |
 | Librarian | Role **Reading Librarian** (or System Manager) | Add, prepare, hide and delete books at `/reading`; edit book lines and tricky words in the Desk. |
 | Administrator | System Manager | Settings, plus all readers and sessions in the Desk. |
 

@@ -36,6 +36,7 @@
 			</form>
 			{% endif %}
 			{% for item in site_items_right %}{{ site_link(item) }}{% endfor %}
+			{% if site_user %}
 			<details class="drop user">
 				<summary aria-label="{{ site_user.full_name | e }}" title="{{ site_user.full_name | e }}">
 					{%- if site_user.image %}<img src="{{ site_user.image | e }}" alt="">{% else %}<span class="initials">{{ site_user.initials | e }}</span>{% endif -%}
@@ -46,6 +47,9 @@
 					<a href="/?cmd=web_logout">Log out</a>
 				</div>
 			</details>
+			{% else %}
+			<a href="/login?redirect-to=/reading">Login</a>
+			{% endif %}
 		</div>
 	</div>
 </nav>

@@ -53,6 +53,16 @@ def _require_login():
 		frappe.throw(_("Please sign in to use ES Reading."), frappe.AuthenticationError)
 
 
+def _guests_allowed():
+	return bool(cint(frappe.db.get_single_value("ES Reading Settings", "allow_guests")))
+
+
+def _require_access():
+	"""Reading books is open to signed-in users, and to guests when the setting allows it."""
+	if frappe.session.user == "Guest" and not _guests_allowed():
+		frappe.throw(_("Please sign in to use ES Reading."), frappe.AuthenticationError)
+
+
 def _is_librarian():
 	return bool(LIBRARIAN_ROLES & set(frappe.get_roles()))
 
@@ -135,23 +145,26 @@ def _clamp(value, low, high, default=None):
 # --------------------------------------------------------------------------- bootstrap
 
 
-@frappe.whitelist()
+@frappe.whitelist(allow_guest=True)
 def get_bootstrap():
-	_require_login()
+	_require_access()
+	guest = frappe.session.user == "Guest"
 	return {
-		"user": frappe.utils.get_fullname(frappe.session.user),
-		"is_librarian": _is_librarian(),
-		"ai_enabled": claude.is_configured(),
+		"user": "" if guest else frappe.utils.get_fullname(frappe.session.user),
+		# A guest has no account: the page keeps their readers and progress in the browser.
+		"guest": guest,
+		"is_librarian": False if guest else _is_librarian(),
+		"ai_enabled": False if guest else claude.is_configured(),
 		"defaults": _defaults(),
 		"countries": COUNTRIES,
-		"readers": _readers(),
+		"readers": [] if guest else _readers(),
 		"books": _books(),
 	}
 
 
-@frappe.whitelist()
+@frappe.whitelist(allow_guest=True)
 def get_books():
-	_require_login()
+	_require_access()
 	return _books()
 
 
@@ -237,9 +250,9 @@ def get_progress(reader):
 # --------------------------------------------------------------------------- books
 
 
-@frappe.whitelist()
+@frappe.whitelist(allow_guest=True)
 def get_book(name):
-	_require_login()
+	_require_access()
 	doc = frappe.get_doc("Reading Book", name)
 	if not _is_librarian() and not (doc.status == "Ready" and doc.published):
 		frappe.throw(_("That book is not available."), frappe.PermissionError)

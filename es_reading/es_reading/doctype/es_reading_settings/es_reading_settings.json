@@ -4,6 +4,8 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "access_section",
+  "allow_guests",
   "ai_section",
   "enable_ai",
   "anthropic_api_key",
@@ -22,6 +24,18 @@
   "max_pdf_mb"
  ],
  "fields": [
+  {
+   "fieldname": "access_section",
+   "fieldtype": "Section Break",
+   "label": "Access"
+  },
+  {
+   "default": "0",
+   "description": "Let anyone open /reading and read the published books without an account. Guests' readers and progress are kept in their own browser only, and they get the standard feedback rather than Claude's. Signed-in families are unaffected.",
+   "fieldname": "allow_guests",
+   "fieldtype": "Check",
+   "label": "Sign-up not required"
+  },
   {
    "fieldname": "ai_section",
    "fieldtype": "Section Break",
@@ -120,7 +134,7 @@
  ],
  "issingle": 1,
  "links": [],
- "modified": "2026-11-10 16:00:00.000000",
+ "modified": "2026-11-10 19:00:00.000000",
  "modified_by": "Administrator",
  "module": "ES Reading",
  "name": "ES Reading Settings",

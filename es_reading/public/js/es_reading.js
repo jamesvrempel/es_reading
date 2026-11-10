@@ -403,7 +403,7 @@
 		);
 		cards.push(h("button", { class: "card", onclick: () => editReader(null) }, h("span", { class: "avatar xl" }, "＋"), h("span", { class: "title" }, "Add a reader")));
 		show(
-			h("div", { class: "bar" }, h("h1", {}, "ES Reading"), h("a", { class: "btn small", href: "/?cmd=web_logout" }, "Sign out")),
+			h("div", { class: "bar" }, h("h1", {}, "ES Reading")),
 			h("div", { class: "page" },
 				h("div", { class: "hero" }, h("h2", {}, "Who's reading today?"), S.boot.readers.length ? null : h("p", {}, "Add each child once. A first name or nickname is all that's needed.")),
 				h("div", { class: "readers" }, cards))
@@ -634,6 +634,7 @@
 	}
 
 	function leaveRun() {
+		document.body.classList.remove("in-session");
 		if (S.run) {
 			S.run.dead = true;
 			if (S.run.listener) S.run.listener.stop();
@@ -678,6 +679,7 @@
 	// ------------------------------------------------------------------ reading view
 
 	function renderReadView(run) {
+		document.body.classList.add("in-session");
 		const ui = (run.ui = {});
 		ui.pageLabel = h("span", { class: "clock" });
 		ui.meter = h("i");
@@ -1105,6 +1107,7 @@
 		const words = trickyList();
 		if (!words.length) { toast("This book has no tricky words. Well done!"); return guard(viewLibrary); }
 		const run = (S.run = { mode: "Tricky Words", dead: false, listener: null });
+		document.body.classList.add("in-session");
 		const session = await guard(() => api("start_session", { reader: S.reader.name, book: S.book.name, mode: "Tricky Words" }, true));
 		const started = performance.now();
 		const stage = h("div", { class: "result" });
@@ -1170,6 +1173,19 @@
 			hear();
 		});
 	}
+
+	// ------------------------------------------------------------------ site menu
+
+	(function siteMenu() {
+		const bar = document.querySelector(".sitebar");
+		if (!bar) return;
+		const toggle = bar.querySelector(".sitebar-toggle");
+		toggle.addEventListener("click", () => toggle.setAttribute("aria-expanded", String(bar.classList.toggle("open"))));
+		const drops = [...bar.querySelectorAll("details.drop")];
+		drops.forEach((d) => d.addEventListener("toggle", () => d.open && drops.forEach((o) => o !== d && (o.open = false))));
+		document.addEventListener("click", (e) => drops.forEach((d) => d.open && !d.contains(e.target) && (d.open = false)));
+		document.addEventListener("keydown", (e) => e.key === "Escape" && drops.forEach((d) => (d.open = false)));
+	})();
 
 	// ------------------------------------------------------------------ go
 

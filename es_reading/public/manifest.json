@@ -1,0 +1,16 @@
+{
+	"name": "ES Reading",
+	"short_name": "ES Reading",
+	"description": "Read along, one page at a time.",
+	"start_url": "/reading",
+	"scope": "/",
+	"display": "standalone",
+	"orientation": "any",
+	"background_color": "#fbf6ec",
+	"theme_color": "#17807a",
+	"icons": [
+		{ "src": "/assets/es_reading/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+		{ "src": "/assets/es_reading/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+		{ "src": "/assets/es_reading/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+	]
+}

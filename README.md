@@ -105,6 +105,29 @@ and up to 20 tricky words with syllables and child-friendly meanings.
 - When the gap is above the threshold the results page leads with three options: read it again,
   practise the tricky words, or listen to the whole story.
 
+## For readers and families
+
+- **Carry on later**: leaving a book part-way saves the place, and opening it again offers to carry on from that page.
+- **My words**: every word a reader needed help with goes into their word bank. Practising a word correctly
+  three times in a row moves it to "words you know now"; needing help with it again brings it back.
+- **Syllables first**: when a reader is stuck, the word is first shown in pieces, then said aloud after a
+  second pause, and skipped after a third. The pieces come from Claude's notes for the book where they exist,
+  otherwise from a rule of thumb, so they are a hint and not a dictionary. Turn it off per reader in Settings.
+- **Badges and streaks**: ten badges for books read, days in a row, reading without help and word practice.
+- **Progress**: books read, minutes, streak, words mastered, charts of words a minute and words needing help.
+- **Just right**: books within a year of the reader's level are marked and listed first. The level is the
+  optional "Reading level (age)" in Settings, or is worked out from books read with little help.
+- **How the words look**: lettering (standard or Lexend), text size, spacing and background per reader.
+- **Home screen**: the page can be added to a tablet's home screen and opens full screen.
+
+## For librarians
+
+**Manage** on a book gives: re-scan, picture, title/shelf/level, pages to read, hide/show and delete.
+
+- **Shelves** group books in the library; with shelves set (or more than six books) a search box and shelf
+  buttons appear.
+- **Pages to read** leaves out whole pages, such as questions or an answer key. It survives a re-scan.
+
 ## Voices
 
 Voices come from the device, not from the server. Each device offers a different set, and browsers do
@@ -125,4 +148,4 @@ Because these are ordinary DocTypes, they are also visible to Claude through Fra
 ## Licence
 
 MIT, see `LICENSE`. PDF.js 3.11.174 (Apache-2.0) is bundled under `es_reading/public/vendor/pdfjs`
-with its own licence file.
+and the Lexend font (SIL Open Font License) under `es_reading/public/fonts`, each with its licence file.

@@ -123,6 +123,7 @@ def _books():
 			"name",
 			"title",
 			"cover_image",
+			"custom_cover",
 			"status",
 			"published",
 			"reading_level",
@@ -310,6 +311,83 @@ def create_book(title=None):
 	return {"name": book.name, "title": book.title, "pdf": file_doc.file_url}
 
 
+COVER_TYPES = {"jpg": "JPEG", "jpeg": "JPEG", "png": "PNG", "webp": "WEBP", "gif": "GIF"}
+MAX_COVER_MB = 5
+
+
+def _attach_cover(doc, filename, content):
+	file_doc = frappe.get_doc(
+		{
+			"doctype": "File",
+			"file_name": filename,
+			"content": content,
+			"is_private": 0,
+			"attached_to_doctype": "Reading Book",
+			"attached_to_name": doc.name,
+			"attached_to_field": "cover_image",
+		}
+	)
+	file_doc.insert(ignore_permissions=True)
+	return file_doc.file_url
+
+
+def _save_page_cover(doc, cover):
+	"""Use the picture of page 1 that the browser rendered (a JPEG data URL) as the cover."""
+	if not (cover and str(cover).startswith("data:image/jpeg;base64,")):
+		return False
+	try:
+		image = base64.b64decode(str(cover).split(",", 1)[1])
+		if len(image) > 600 * 1024:
+			return False
+		doc.cover_image = _attach_cover(doc, f"{doc.name}-cover.jpg", image)
+		doc.flags.cover_from_scan = True
+		return True
+	except Exception:
+		# A cover is a nicety; never fail the book over it.
+		frappe.log_error(title="ES Reading: cover image not saved")
+		return False
+
+
+@frappe.whitelist(methods=["POST"])
+def set_book_cover(book, page_cover=None):
+	"""Give a book its own picture (multipart field "file"), or go back to page 1 (page_cover data URL)."""
+	_require_librarian()
+	doc = frappe.get_doc("Reading Book", book)
+	upload = frappe.request.files.get("file") if frappe.request else None
+
+	if upload:
+		content = upload.stream.read()
+		if len(content) > MAX_COVER_MB * 1024 * 1024:
+			frappe.throw(_("That picture is larger than {0} MB.").format(MAX_COVER_MB))
+		ext = (upload.filename or "").rsplit(".", 1)[-1].lower()
+		if ext not in COVER_TYPES:
+			frappe.throw(_("Please choose a JPG, PNG, WebP or GIF picture."))
+		try:
+			import io
+
+			from PIL import Image
+
+			with Image.open(io.BytesIO(content)) as image:
+				actual = image.format
+				image.verify()
+		except Exception:
+			frappe.throw(_("That file is not a picture this app can use."))
+		if actual != COVER_TYPES[ext]:
+			frappe.throw(_("That file is not a picture this app can use."))
+		doc.cover_image = _attach_cover(doc, f"{doc.name}-picture.{ext}", content)
+		doc.flags.cover_from_scan = True  # set the flag ourselves below
+		doc.custom_cover = 1
+	elif page_cover:
+		if not _save_page_cover(doc, page_cover):
+			frappe.throw(_("The picture of page 1 could not be saved."))
+		doc.custom_cover = 0
+	else:
+		frappe.throw(_("Please choose a picture."))
+
+	doc.save(ignore_permissions=True)
+	return {"name": doc.name, "cover_image": doc.cover_image, "custom_cover": doc.custom_cover}
+
+
 def _should_skip(text):
 	if not re.search(r"[A-Za-z]", text):
 		return True
@@ -346,26 +424,8 @@ def save_book_content(book, pages, page_count=0, cover=None):
 	doc.ai_prepared = 0
 	doc.note = ""
 
-	if cover and str(cover).startswith("data:image/jpeg;base64,"):
-		try:
-			image = base64.b64decode(str(cover).split(",", 1)[1])
-			if len(image) <= 600 * 1024:
-				file_doc = frappe.get_doc(
-					{
-						"doctype": "File",
-						"file_name": f"{doc.name}-cover.jpg",
-						"content": image,
-						"is_private": 0,
-						"attached_to_doctype": "Reading Book",
-						"attached_to_name": doc.name,
-						"attached_to_field": "cover_image",
-					}
-				)
-				file_doc.insert(ignore_permissions=True)
-				doc.cover_image = file_doc.file_url
-		except Exception:
-			# A cover is a nicety; never fail the book over it.
-			frappe.log_error(title="ES Reading: cover image not saved")
+	if not doc.custom_cover:
+		_save_page_cover(doc, cover)
 
 	has_text = any(not line.skip for line in doc.lines)
 	ai = claude.is_configured()

@@ -11,6 +11,7 @@
   "published",
   "column_break_1",
   "cover_image",
+  "custom_cover",
   "reading_level",
   "summary",
   "stats_section",
@@ -63,6 +64,13 @@
    "fieldname": "cover_image",
    "fieldtype": "Attach Image",
    "label": "Cover"
+  },
+  {
+   "default": "0",
+   "description": "Ticked automatically when you choose your own picture. Untick to go back to a picture of page 1 at the next re-scan.",
+   "fieldname": "custom_cover",
+   "fieldtype": "Check",
+   "label": "Keep this picture when the PDF is re-scanned"
   },
   {
    "fieldname": "reading_level",
@@ -139,7 +147,7 @@
  ],
  "image_field": "cover_image",
  "links": [],
- "modified": "2026-11-10 16:00:00.000000",
+ "modified": "2026-11-10 22:00:00.000000",
  "modified_by": "Administrator",
  "module": "ES Reading",
  "name": "Reading Book",

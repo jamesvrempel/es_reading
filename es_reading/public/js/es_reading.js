@@ -465,16 +465,20 @@
 			}
 			pages.push({ page: n, lines: out });
 		}
-		let cover = null;
+		const cover = await renderPageOne(pdf);
+		return { pages, pageCount: pdf.numPages, cover };
+	}
+
+	/** A small JPEG of page 1, used as the book's default picture. */
+	async function renderPageOne(pdf) {
 		try {
 			const first = await pdf.getPage(1);
 			const base = first.getViewport({ scale: 1 });
 			const view = first.getViewport({ scale: 420 / base.width });
 			const canvas = h("canvas", { width: Math.round(view.width), height: Math.round(view.height) });
 			await first.render({ canvasContext: canvas.getContext("2d"), viewport: view }).promise;
-			cover = canvas.toDataURL("image/jpeg", 0.8);
-		} catch (e) { console.warn("cover", e); }
-		return { pages, pageCount: pdf.numPages, cover };
+			return canvas.toDataURL("image/jpeg", 0.8);
+		} catch (e) { console.warn("cover", e); return null; }
 	}
 
 	async function prepareBook(book, status) {
@@ -627,6 +631,7 @@
 						await prepareBook(b, (m) => (btn.textContent = m));
 						await viewLibrary();
 					}) }, ready ? "Re-scan" : "Prepare"),
+					h("button", { class: "btn small", onclick: () => bookPicture(b) }, "Picture"),
 					ready && h("button", { class: "btn small", onclick: () => guard(async () => { await api("set_book_published", { book: b.name, published: b.published ? 0 : 1 }, true); await viewLibrary(); }) }, b.published ? "Hide" : "Show"),
 					h("button", { class: "btn small danger", onclick: () => window.confirm(`Delete "${b.title}" and its reading history?`) && guard(async () => { await api("delete_book", { book: b.name }, true); await viewLibrary(); }) }, "Delete")));
 		});
@@ -647,6 +652,45 @@
 				notices.map((n) => h("div", { class: "notice" }, n)),
 				cards.length ? h("div", { class: "grid" }, cards) : h("div", { class: "empty" }, lib ? "No books yet. Add a PDF to get started." : "No books in the library yet."))
 		);
+	}
+
+	/** Librarian: give a book its own picture, or go back to the picture of page 1. */
+	function bookPicture(book) {
+		const file = h("input", { type: "file", accept: "image/jpeg,image/png,image/webp,image/gif" });
+		const preview = h("span", { class: "cover", style: (book.cover_image ? `background-image:url("${encodeURI(book.cover_image)}");` : "") + "max-width:180px;margin:0 auto 12px" }, book.cover_image ? "" : "📖");
+		const status = h("p", { class: "meta" }, book.custom_cover ? "This book is using your own picture." : "This book is using a picture of page 1.");
+		file.onchange = () => {
+			if (!file.files[0]) return;
+			preview.style.backgroundImage = `url("${URL.createObjectURL(file.files[0])}")`;
+			preview.textContent = "";
+		};
+		const body = h("div", {}, preview, status,
+			h("label", { class: "field" }, h("span", {}, "Choose a picture"), file, h("small", {}, "JPG, PNG, WebP or GIF, up to 5 MB. A tall picture (3 wide by 4 high) fits the card best.")));
+		modal(`Picture for “${book.title}”`, body, (close) => [
+			book.custom_cover && book.pdf && h("button", { class: "btn small", onclick: (e) => guard(async () => {
+				e.currentTarget.disabled = true;
+				status.textContent = "Making a picture of page 1…";
+				const cover = await renderPageOne(await openPdf(book.pdf));
+				if (!cover) throw new Error("Page 1 could not be drawn.");
+				await api("set_book_cover", { book: book.name, page_cover: cover }, true);
+				close();
+				await viewLibrary();
+			}) }, "Use page 1 again"),
+			h("button", { class: "btn", onclick: close }, "Cancel"),
+			h("button", { class: "btn primary", onclick: (e) => guard(async () => {
+				if (!file.files[0]) return toast("Choose a picture first.");
+				const btn = e.currentTarget;
+				btn.disabled = true;
+				try {
+					const form = new FormData();
+					form.append("file", file.files[0]);
+					form.append("book", book.name);
+					await api("set_book_cover", form);
+					close();
+					await viewLibrary();
+				} finally { btn.disabled = false; }
+			}) }, "Save picture"),
+		]);
 	}
 
 	function addBook() {

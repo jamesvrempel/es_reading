@@ -1,0 +1,48 @@
+{
+ "actions": [],
+ "creation": "2026-11-10 16:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "word",
+  "say",
+  "meaning"
+ ],
+ "fields": [
+  {
+   "columns": 2,
+   "fieldname": "word",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Word",
+   "reqd": 1
+  },
+  {
+   "columns": 2,
+   "description": "Syllables, e.g. eu-ca-lyp-tus",
+   "fieldname": "say",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Sounds like"
+  },
+  {
+   "columns": 6,
+   "fieldname": "meaning",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "label": "Child-friendly meaning"
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-11-10 16:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ES Reading",
+ "name": "Reading Book Word",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

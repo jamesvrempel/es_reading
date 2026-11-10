@@ -1,0 +1,79 @@
+{
+ "actions": [],
+ "creation": "2026-11-10 16:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "page_no",
+  "text",
+  "skip",
+  "x",
+  "y",
+  "w",
+  "h"
+ ],
+ "fields": [
+  {
+   "columns": 1,
+   "fieldname": "page_no",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Page"
+  },
+  {
+   "columns": 7,
+   "fieldname": "text",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "label": "Text"
+  },
+  {
+   "columns": 1,
+   "description": "Tick for headers, page numbers and answer blanks.",
+   "fieldname": "skip",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Don't read"
+  },
+  {
+   "fieldname": "x",
+   "fieldtype": "Float",
+   "hidden": 1,
+   "label": "X",
+   "precision": "5"
+  },
+  {
+   "fieldname": "y",
+   "fieldtype": "Float",
+   "hidden": 1,
+   "label": "Y",
+   "precision": "5"
+  },
+  {
+   "fieldname": "w",
+   "fieldtype": "Float",
+   "hidden": 1,
+   "label": "W",
+   "precision": "5"
+  },
+  {
+   "fieldname": "h",
+   "fieldtype": "Float",
+   "hidden": 1,
+   "label": "H",
+   "precision": "5"
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-11-10 16:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ES Reading",
+ "name": "Reading Book Line",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

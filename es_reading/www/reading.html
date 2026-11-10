@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>ES Reading</title>
+<link rel="stylesheet" href="/assets/es_reading/css/es_reading.css?v={{ app_version }}">
+</head>
+<body>
+<div id="app" aria-live="polite"><p class="loading">Opening the library…</p></div>
+<script>
+window.ES_READING = {
+	csrf: "{{ csrf_token }}",
+	version: "{{ app_version }}",
+	pdfWorker: "/assets/es_reading/vendor/pdfjs/pdf.worker.min.js"
+};
+</script>
+<script src="/assets/es_reading/vendor/pdfjs/pdf.min.js"></script>
+<script src="/assets/es_reading/js/es_reading.js?v={{ app_version }}"></script>
+</body>
+</html>

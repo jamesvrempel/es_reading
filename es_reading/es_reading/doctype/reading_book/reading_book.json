@@ -13,6 +13,8 @@
   "cover_image",
   "custom_cover",
   "reading_level",
+  "shelf",
+  "skip_pages",
   "summary",
   "stats_section",
   "page_count",
@@ -77,6 +79,19 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Reading level"
+  },
+  {
+   "description": "Groups books in the library, for example Animals or Level 2.",
+   "fieldname": "shelf",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Shelf"
+  },
+  {
+   "description": "Page numbers separated by commas. Set with Pages in the app.",
+   "fieldname": "skip_pages",
+   "fieldtype": "Data",
+   "label": "Pages not read"
   },
   {
    "fieldname": "summary",
@@ -147,7 +162,7 @@
  ],
  "image_field": "cover_image",
  "links": [],
- "modified": "2026-11-10 22:00:00.000000",
+ "modified": "2026-11-10 23:00:00.000000",
  "modified_by": "Administrator",
  "module": "ES Reading",
  "name": "Reading Book",

@@ -71,10 +71,10 @@
 		setTimeout(() => t.remove(), ms || 4000);
 	}
 
-	function modal(title, body, actions) {
+	function modal(title, body, actions, wide) {
 		const veil = h("div", { class: "veil" });
 		const close = () => veil.remove();
-		veil.append(h("div", { class: "modal", role: "dialog", "aria-label": title }, h("h2", {}, title), body, h("div", { class: "actions" }, actions(close))));
+		veil.append(h("div", { class: "modal" + (wide ? " wide" : ""), role: "dialog", "aria-label": title }, h("h2", {}, title), body, h("div", { class: "actions" }, actions(close))));
 		veil.addEventListener("click", (e) => e.target === veil && close());
 		document.body.append(veil);
 		return close;
@@ -100,7 +100,7 @@
 	// ------------------------------------------------------------------ guest mode (no account)
 	// With "Sign-up not required" on, a guest's readers and progress live in this browser only.
 
-	const GUEST_METHODS = new Set(["save_reader", "delete_reader", "get_progress", "start_session", "finish_session", "session_feedback"]);
+	const GUEST_METHODS = new Set(["save_reader", "delete_reader", "get_progress", "start_session", "finish_session", "session_feedback", "save_progress", "get_resume", "practise_words"]);
 
 	function guestDb() {
 		if (!S.guestDb) {
@@ -140,6 +140,10 @@
 				lines_per_turn: clamp(parseInt(data.lines_per_turn, 10) || d.lines_per_turn, 1, 40),
 				silence_seconds: clamp(parseInt(data.silence_seconds, 10) || d.silence_seconds, 2, 20),
 				gap_percent: clamp(parseInt(data.gap_percent, 10) || d.gap_percent, 5, 300),
+				reading_age: parseInt(data.reading_age, 10) ? clamp(parseInt(data.reading_age, 10), 4, 18) : 0,
+				syllable_hint: data.syllable_hint === undefined ? 1 : Number(data.syllable_hint) ? 1 : 0,
+				display_prefs: typeof data.display_prefs === "string" ? data.display_prefs.slice(0, 300) : "{}",
+				word_bank: reader.word_bank || {},
 			});
 			guestSave();
 			return Object.assign({}, reader);
@@ -172,16 +176,50 @@
 			const gap = rs && ns ? ((rs - ns) / ns) * 100 : 0;
 			const threshold = reader.gap_percent || d.gap_percent;
 			Object.assign(row, {
-				status: "Completed", completed_on: new Date().toISOString().slice(0, 10), reader_seconds: rs, narrator_seconds: ns,
+				status: "Completed", completed_on: localDay(0), reader_seconds: rs, narrator_seconds: ns,
 				gap_percent: gap, words_total: words, words_helped: helped.length, helped_words: helped.join(", "),
 				reader_wpm: words && rs ? (words / rs) * 60 : 0,
 			});
+			reader.word_bank = reader.word_bank || {};
+			helped.forEach((word) => {
+				const key = norm(word);
+				if (!key) return;
+				const entry = (reader.word_bank[key] = reader.word_bank[key] || { w: word.toLowerCase(), h: 0, r: 0 });
+				entry.h += 1;
+				entry.r = 0;
+				entry.last = localDay(0);
+			});
 			guestSave();
 			return {
+				reader: reader.name ? Object.assign({}, reader) : null,
 				name: row.name, reader_seconds: rs, narrator_seconds: ns, gap_percent: Math.round(gap * 10) / 10, threshold,
 				suggest_practice: Boolean(rs && ns && gap > threshold), words_total: words, words_helped: helped.length,
 				reader_wpm: Math.round(row.reader_wpm), narrator_wpm: words && ns ? Math.round((words / ns) * 60) : 0,
 			};
+		}
+		if (method === "save_progress") {
+			const row = session();
+			if (row && row.status === "In Progress") {
+				const data = JSON.parse(args.data);
+				Object.assign(row, { lines_completed: Number(data.lines_completed) || 0, reader_seconds: Number(data.reader_seconds) || 0, narrator_seconds: Number(data.narrator_seconds) || 0, helped_list: (data.helped_words || []).map(String) });
+				guestSave();
+			}
+			return { ok: true };
+		}
+		if (method === "get_resume") {
+			const row = db.sessions.filter((x) => x.reader === args.reader && x.book === args.book && x.status === "In Progress" && x.lines_completed > 0 && (x.mode === "Read Together" || x.mode === "Re-read")).pop();
+			return row ? { session: row.name, mode: row.mode, lines_completed: row.lines_completed, reader_seconds: row.reader_seconds, narrator_seconds: row.narrator_seconds, helped_words: row.helped_list || [] } : null;
+		}
+		if (method === "practise_words") {
+			const reader = db.readers.find((r) => r.name === args.reader);
+			if (!reader) throw new Error("That reader was not found on this device.");
+			reader.word_bank = reader.word_bank || {};
+			JSON.parse(args.results).forEach((item) => {
+				const entry = reader.word_bank[norm(item.word)];
+				if (entry) { entry.r = item.right ? Math.min((entry.r || 0) + 1, 3) : 0; entry.last = localDay(0); }
+			});
+			guestSave();
+			return Object.assign({}, reader);
 		}
 		if (method === "session_feedback") {
 			const row = session() || {};
@@ -488,6 +526,152 @@
 		return api("save_book_content", { book: book.name, pages: JSON.stringify(found.pages), page_count: found.pageCount, cover: found.cover }, true);
 	}
 
+	// ------------------------------------------------------------------ reader extras: display, level, stats, word bank
+
+	function localDay(daysAgo) {
+		const d = new Date();
+		d.setDate(d.getDate() - (daysAgo || 0));
+		return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+	}
+
+	function displayPrefs(reader) {
+		try { return JSON.parse((reader || S.reader || {}).display_prefs || "{}") || {}; } catch (e) { return {}; }
+	}
+
+	/** Apply the reader's font, text size, spacing and background to the reading panel. */
+	function applyDisplay() {
+		const d = displayPrefs();
+		const data = document.body.dataset;
+		data.font = d.font || "default";
+		data.size = d.size || "normal";
+		data.spacing = d.spacing || "normal";
+		data.bg = d.background || "cream";
+	}
+
+	function updateReader(reader) {
+		if (!reader || !reader.name) return;
+		S.reader = reader;
+		const at = S.boot.readers.findIndex((r) => r.name === reader.name);
+		if (at >= 0) S.boot.readers[at] = reader;
+		applyDisplay();
+	}
+
+	/** Words the reader has needed help with: still learning, and mastered (said right three times running). */
+	function wordBank() {
+		const bank = (S.reader && S.reader.word_bank) || {};
+		const all = Object.keys(bank).map((key) => Object.assign({ key }, bank[key])).filter((w) => w.w);
+		all.sort((a, b) => String(b.last || "").localeCompare(String(a.last || "")));
+		return { learning: all.filter((w) => (w.r || 0) < 3), mastered: all.filter((w) => (w.r || 0) >= 3) };
+	}
+
+	function bookAge(book) {
+		const match = /(\d+)/.exec(book.reading_level || "");
+		return match ? parseInt(match[1], 10) : null;
+	}
+
+	/** The reader's level as an age: set by a grown-up, or worked out from books read comfortably. */
+	function readerLevel() {
+		if (S.reader.reading_age) return S.reader.reading_age;
+		const ages = {};
+		(S.boot.books || []).forEach((b) => (ages[b.name] = bookAge(b)));
+		const comfortable = (S.progress || []).filter((p) => (p.mode === "Read Together" || p.mode === "Re-read") && p.words_total > 0 && ages[p.book] && p.words_helped / p.words_total <= 0.06).slice(0, 5);
+		if (comfortable.length < 2) return null;
+		return Math.round(comfortable.reduce((n, p) => n + ages[p.book], 0) / comfortable.length);
+	}
+
+	function bookFit(book) {
+		const level = readerLevel();
+		const age = bookAge(book);
+		if (!level || !age) return "";
+		return Math.abs(age - level) <= 1 ? "right" : age > level ? "stretch" : "easy";
+	}
+
+	function readerStats() {
+		const progress = S.progress || [];
+		const reads = progress.filter((p) => p.mode === "Read Together" || p.mode === "Re-read");
+		const days = [...new Set(progress.map((p) => String(p.completed_on || "").slice(0, 10)).filter(Boolean))].sort();
+		const has = new Set(days);
+		let streak = 0;
+		const from = has.has(localDay(0)) ? 0 : has.has(localDay(1)) ? 1 : -1;
+		if (from >= 0) while (has.has(localDay(from + streak))) streak++;
+		let best = 0;
+		let run = 0;
+		days.forEach((day, i) => {
+			const prev = i ? new Date(days[i - 1] + "T12:00:00") : null;
+			run = prev && Math.round((new Date(day + "T12:00:00") - prev) / 86400000) === 1 ? run + 1 : 1;
+			best = Math.max(best, run);
+		});
+		const books = new Set(reads.map((p) => p.book)).size;
+		const mastered = wordBank().mastered.length;
+		const badges = [
+			["first", "📗", "First book", books >= 1],
+			["five", "📚", "Bookworm: 5 books", books >= 5],
+			["ten", "🏅", "Super reader: 10 books", books >= 10],
+			["twentyfive", "🏆", "Library legend: 25 books", books >= 25],
+			["streak3", "🔥", "3 days in a row", best >= 3],
+			["streak7", "🌟", "7 days in a row", best >= 7],
+			["nohelp", "💪", "A book with no help", reads.some((p) => p.reader_seconds > 0 && !p.words_helped)],
+			["speedy", "⚡", "As quick as the narrator", reads.some((p) => p.reader_seconds > 0 && p.narrator_seconds > 0 && p.gap_percent <= 0)],
+			["tricky", "🧩", "Tricky word practice", progress.some((p) => p.mode === "Tricky Words")],
+			["wizard", "🧙", "Word wizard: 10 words mastered", mastered >= 10],
+		].map(([id, icon, title, earned]) => ({ id, icon, title, earned }));
+		return { books, streak, mastered, reads, badges, minutes: Math.round(reads.reduce((n, p) => n + (p.reader_seconds || 0), 0) / 60) };
+	}
+
+	/** Split a word into rough syllables for a hint. Uses the book's own tricky-word notes when it has them. */
+	function syllables(word) {
+		const known = S.book && (S.book.tricky_words || []).find((t) => norm(t.word) === norm(word));
+		if (known && known.say && known.say.includes("-")) return known.say.split("-").filter(Boolean);
+		const w = word.replace(/[^A-Za-z’']/g, "");
+		if (w.length < 5) return [w];
+		// Work in sound units so that pairs like "th" and "sh" are never pulled apart.
+		const units = w.match(/th|sh|ch|ph|wh|ck|qu|[a-z’']/gi) || [w];
+		const vowel = (u) => /^[aeiouy]$/i.test(u || "");
+		const parts = [];
+		let cur = "";
+		for (let i = 0; i < units.length; i++) {
+			cur += units[i];
+			if (!vowel(units[i]) || vowel(units[i + 1])) continue;
+			let run = 0; // consonant units before the next vowel
+			while (i + 1 + run < units.length && !vowel(units[i + 1 + run])) run++;
+			if (i + 1 + run >= units.length) continue; // no vowel left: the rest stays with this piece
+			if (run >= 2) cur += units[++i]; // split a cluster after its first consonant: "but-ter", "grand-fa"
+			if (run >= 3 && /^[nrlm]$/i.test(units[i]) && !/^[lr]$/i.test(units[i + 2])) cur += units[++i]; // "grand-fa", but "ter-fly"
+			parts.push(cur);
+			cur = "";
+		}
+		if (cur) parts.push(cur);
+		// an ending with no vowel sound of its own ("-de", "-s") belongs with the piece before it
+		while (parts.length > 1 && /^[^aeiouy]*e?$/i.test(parts[parts.length - 1])) {
+			const last = parts.pop();
+			parts[parts.length - 1] += last;
+		}
+		return parts;
+	}
+
+	function svg(tag, attrs, ...kids) {
+		const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+		Object.entries(attrs || {}).forEach(([k, v]) => el.setAttribute(k, v));
+		kids.flat().forEach((kid) => kid != null && el.append(kid.nodeType ? kid : document.createTextNode(String(kid))));
+		return el;
+	}
+
+	/** A small chart of one number per session, oldest on the left. */
+	function chart(values, kind, colour) {
+		const W = 320, H = 110, pad = 14;
+		const max = Math.max(...values, 1);
+		const x = (i) => (values.length === 1 ? W / 2 : pad + (i * (W - 2 * pad)) / (values.length - 1));
+		const y = (v) => H - pad - (v / max) * (H - 2 * pad - 12);
+		const marks = kind === "bar"
+			? values.map((v, i) => svg("rect", { x: x(i) - 5, y: y(v), width: 10, height: Math.max(H - pad - y(v), 1), rx: 3, fill: colour }))
+			: [svg("polyline", { points: values.map((v, i) => `${x(i)},${y(v)}`).join(" "), fill: "none", stroke: colour, "stroke-width": 3, "stroke-linejoin": "round", "stroke-linecap": "round" }),
+				...values.map((v, i) => svg("circle", { cx: x(i), cy: y(v), r: 4, fill: colour }))];
+		const last = values[values.length - 1];
+		return svg("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img", "aria-label": `Latest ${Math.round(last)}, highest ${Math.round(max)}` },
+			svg("line", { x1: pad, y1: H - pad, x2: W - pad, y2: H - pad, stroke: "#e6dcc8", "stroke-width": 2 }), marks,
+			svg("text", { x: W - pad, y: 12, "text-anchor": "end", class: "chart-label" }, `latest ${Math.round(last)} · best ${Math.round(max)}`));
+	}
+
 	// ------------------------------------------------------------------ start-up and readers
 
 	async function start() {
@@ -497,6 +681,7 @@
 		S.voices = await loadVoices();
 		const remembered = localStorage.getItem("es_reading_reader");
 		S.reader = S.boot.readers.find((r) => r.name === remembered) || null;
+		applyDisplay();
 		if (S.reader) await viewLibrary(); else viewReaders();
 	}
 
@@ -517,6 +702,7 @@
 	async function chooseReader(reader) {
 		S.reader = reader;
 		localStorage.setItem("es_reading_reader", reader.name);
+		applyDisplay();
 		await viewLibrary();
 	}
 
@@ -547,7 +733,18 @@
 		const lines = h("input", { type: "number", min: 1, max: 40, value: draft.lines_per_turn || d.lines_per_turn });
 		const silence = h("input", { type: "number", min: 2, max: 20, value: draft.silence_seconds || d.silence_seconds });
 		const gap = h("input", { type: "number", min: 5, max: 300, value: draft.gap_percent || d.gap_percent });
+		const dp = displayPrefs(draft);
+		const choose = (options, current) => h("select", {}, options.map(([value, label]) => h("option", { value, selected: value === current }, label)));
+		const level = h("input", { type: "number", min: 4, max: 18, value: draft.reading_age || "", placeholder: "Worked out automatically" });
+		const hint = h("input", { type: "checkbox", checked: reader ? Boolean(draft.syllable_hint) : true });
+		const font = choose([["default", "Rounded (standard)"], ["lexend", "Lexend (wider letters)"]], dp.font || "default");
+		const size = choose([["normal", "Normal"], ["large", "Large"], ["xlarge", "Extra large"]], dp.size || "normal");
+		const spacing = choose([["normal", "Normal"], ["wide", "Wide"]], dp.spacing || "normal");
+		const background = choose([["cream", "Cream"], ["white", "White"], ["blue", "Pale blue"], ["yellow", "Pale yellow"], ["dark", "Dark"]], dp.background || "cream");
 		const collect = () => ({
+			reading_age: level.value || 0,
+			syllable_hint: hint.checked ? 1 : 0,
+			display_prefs: JSON.stringify({ font: font.value, size: size.value, spacing: spacing.value, background: background.value }),
 			name: reader && reader.name,
 			reader_name: name.value,
 			avatar: draft.avatar,
@@ -578,7 +775,12 @@
 			h("div", { class: "two" },
 				h("label", { class: "field" }, h("span", {}, "Lines per turn"), lines),
 				h("label", { class: "field" }, h("span", {}, "Help after a pause of (seconds)"), silence)),
-			h("label", { class: "field" }, h("span", {}, "Suggest practice when reading takes this much longer than the narrator (%)"), gap)
+			h("label", { class: "field" }, h("span", {}, "Suggest practice when reading takes this much longer than the narrator (%)"), gap),
+			h("label", { class: "field" }, h("span", {}, "Reading level (age)"), level, h("small", {}, "Optional. Books near this level are marked “Just right”. Leave it blank and the app works it out from the books read.")),
+			h("label", { class: "field check" }, hint, h("span", {}, "Show the syllables first when stuck on a word")),
+			h("h3", {}, "How the words look"),
+			h("div", { class: "two" }, h("label", { class: "field" }, h("span", {}, "Lettering"), font), h("label", { class: "field" }, h("span", {}, "Text size"), size)),
+			h("div", { class: "two" }, h("label", { class: "field" }, h("span", {}, "Spacing"), spacing), h("label", { class: "field" }, h("span", {}, "Background"), background))
 		);
 		modal(reader ? "Reader settings" : "Add a reader", body, (close) => [
 			reader && h("button", { class: "btn danger small", onclick: () => {
@@ -611,46 +813,185 @@
 		const [books, progress] = await Promise.all([api("get_books"), api("get_progress", { reader: S.reader.name })]);
 		S.boot.books = books;
 		S.progress = progress;
+		S.filter = S.filter || { text: "", shelf: "" };
 		const readBooks = new Set(progress.filter((p) => p.mode !== "Listen" && p.mode !== "Tricky Words").map((p) => p.book));
 		const lib = S.boot.is_librarian;
+		const stats = readerStats();
+		const shelves = [...new Set(books.map((b) => (b.shelf || "").trim()).filter(Boolean))].sort((x, y) => x.localeCompare(y));
+		if (!shelves.includes(S.filter.shelf)) S.filter.shelf = "";
+		const fitRank = { right: 0, "": 1, stretch: 2, easy: 3 };
 
-		const cards = books.map((b) => {
+		const card = (b) => {
 			const ready = b.status === "Ready";
+			const fit = ready ? bookFit(b) : "";
 			const cover = h("span", { class: "cover", style: b.cover_image ? `background-image:url("${encodeURI(b.cover_image)}")` : "" }, b.cover_image ? "" : "📖");
 			const meta = [b.reading_level, b.word_count ? `${b.word_count} words` : ""].filter(Boolean).join(" · ");
-			const kids = [cover, h("span", { class: "title" }, b.title), meta && h("span", { class: "meta" }, meta), readBooks.has(b.name) && h("span", { class: "tick", title: "Read" }, "✓")];
+			const kids = [cover, h("span", { class: "title" }, b.title), meta && h("span", { class: "meta" }, meta),
+				fit === "right" && h("span", { class: "fit right" }, "Just right for you"),
+				fit === "stretch" && h("span", { class: "fit" }, "A challenge"),
+				readBooks.has(b.name) && h("span", { class: "tick", title: "Read" }, "✓")];
 			if (!lib) return h("button", { class: "card", onclick: () => openBook(b) }, kids);
 			const status = !ready ? b.status + (b.note ? ": " + b.note : "") : b.published ? "" : "Hidden from families";
 			return h("div", { class: "card" }, kids,
+				b.shelf && h("span", { class: "meta" }, "Shelf: " + b.shelf),
 				status && h("span", { class: "status" }, status),
 				h("div", { class: "row" },
 					ready && h("button", { class: "btn small primary", onclick: () => openBook(b) }, "Open"),
-					b.pdf && h("button", { class: "btn small", onclick: (e) => guard(async () => {
-						const btn = e.currentTarget;
-						btn.disabled = true;
-						await prepareBook(b, (m) => (btn.textContent = m));
-						await viewLibrary();
-					}) }, ready ? "Re-scan" : "Prepare"),
-					h("button", { class: "btn small", onclick: () => bookPicture(b) }, "Picture"),
-					ready && h("button", { class: "btn small", onclick: () => guard(async () => { await api("set_book_published", { book: b.name, published: b.published ? 0 : 1 }, true); await viewLibrary(); }) }, b.published ? "Hide" : "Show"),
-					h("button", { class: "btn small danger", onclick: () => window.confirm(`Delete "${b.title}" and its reading history?`) && guard(async () => { await api("delete_book", { book: b.name }, true); await viewLibrary(); }) }, "Delete")));
-		});
+					h("button", { class: "btn small", onclick: () => manageBook(b, shelves) }, "Manage")));
+		};
+
+		const grid = h("div", { class: "grid" });
+		const none = h("div", { class: "empty" });
+		const paint = () => {
+			const text = S.filter.text.trim().toLowerCase();
+			const shown = books
+				.filter((b) => !S.filter.shelf || (b.shelf || "").trim() === S.filter.shelf)
+				.filter((b) => !text || [b.title, b.shelf, b.reading_level, b.summary].some((v) => String(v || "").toLowerCase().includes(text)))
+				.map((b, i) => ({ b, i, rank: fitRank[b.status === "Ready" ? bookFit(b) : ""] }))
+				.sort((x, y) => x.rank - y.rank || x.i - y.i)
+				.map((x) => card(x.b));
+			grid.replaceChildren(...shown);
+			none.textContent = shown.length ? "" : books.length ? "No books match. Try another word or shelf." : lib ? "No books yet. Add a PDF to get started." : "No books in the library yet.";
+			none.hidden = Boolean(shown.length);
+		};
+		const chips = h("div", { class: "chips" });
+		const paintChips = () => chips.replaceChildren(...["", ...shelves].map((name) =>
+			h("button", { class: "chip" + (S.filter.shelf === name ? " on" : ""), onclick: () => { S.filter.shelf = name; paintChips(); paint(); } }, name || "All books")));
+		const search = h("input", { type: "search", class: "search", placeholder: "Find a book…", "aria-label": "Find a book", value: S.filter.text });
+		search.oninput = () => { S.filter.text = search.value; paint(); };
+		paintChips();
+		paint();
 
 		const notices = [];
 		const v = currentVoice();
 		if (v.note) notices.push(v.note);
 		if (S.guest) notices.push(h("span", {}, "You're reading as a guest. Readers and progress are saved on this device only. ", h("a", { href: "/login?redirect-to=/reading" }, "Sign in"), " to keep them on your account."));
 		if (!SR) notices.push("This browser can't listen to reading aloud. Chrome, Edge or Safari can. You can still read along and tap any word to hear it.");
+		const learning = wordBank().learning.length;
+		const progressLabel = stats.books || stats.streak ? `⭐ ${stats.books} ${stats.books === 1 ? "book" : "books"}` + (stats.streak > 1 ? ` · 🔥 ${stats.streak} days` : "") : "📈 Progress";
 		show(
 			h("div", { class: "bar" },
 				h("button", { class: "who btn small", onclick: viewReaders, title: "Change reader" }, h("span", { class: "avatar" }, S.reader.avatar || "🦊"), S.reader.reader_name),
 				h("h1", {}, "Library"),
 				lib && h("button", { class: "btn small sun", onclick: addBook }, "＋ Add a book"),
-				h("button", { class: "btn small", onclick: viewProgress }, "📈 Progress"),
+				h("button", { class: "btn small", onclick: viewWords, title: "My words" }, "🧠 My words" + (learning ? ` (${learning})` : "")),
+				h("button", { class: "btn small", onclick: viewProgress, title: "Progress" }, progressLabel),
 				h("button", { class: "btn small", onclick: () => editReader(S.reader) }, "⚙ Settings")),
 			h("div", { class: "page" },
 				notices.map((n) => h("div", { class: "notice" }, n)),
-				cards.length ? h("div", { class: "grid" }, cards) : h("div", { class: "empty" }, lib ? "No books yet. Add a PDF to get started." : "No books in the library yet."))
+				(books.length > 6 || shelves.length > 0) && h("div", { class: "toolbar" }, search, shelves.length ? chips : null),
+				grid, none)
+		);
+	}
+
+	/** Librarian: everything that can be done to one book. */
+	function manageBook(b, shelves) {
+		const ready = b.status === "Ready";
+		const status = h("p", { class: "meta" });
+		const act = (label, fn, cls) => h("button", { class: "btn " + (cls || ""), onclick: (e) => fn(e.currentTarget) }, label);
+		const close = modal(b.title, h("div", { class: "modes" },
+			b.pdf && act(ready ? "🔄 Re-scan the PDF" : "✨ Prepare this book", (btn) => guard(async () => {
+				btn.disabled = true;
+				await prepareBook(b, (m) => (status.textContent = m));
+				close();
+				await viewLibrary();
+			})),
+			act("🖼 Picture", () => { close(); bookPicture(b); }),
+			act("✏️ Title, shelf and level", () => { close(); bookDetails(b, shelves); }),
+			ready && act("📄 Choose the pages to read", () => { close(); bookPages(b); }),
+			ready && act(b.published ? "🙈 Hide from families" : "👀 Show to families", () => guard(async () => { await api("set_book_published", { book: b.name, published: b.published ? 0 : 1 }, true); close(); await viewLibrary(); })),
+			act("🗑 Delete", () => window.confirm(`Delete "${b.title}" and its reading history?`) && guard(async () => { await api("delete_book", { book: b.name }, true); close(); await viewLibrary(); }), "danger"),
+			status), (c) => [h("button", { class: "btn", onclick: c }, "Close")]);
+	}
+
+	function bookDetails(b, shelves) {
+		const title = h("input", { type: "text", maxlength: 140, value: b.title || "" });
+		const shelf = h("input", { type: "text", maxlength: 60, value: b.shelf || "", list: "es-shelves", placeholder: "For example Animals or Level 2" });
+		const level = h("input", { type: "text", maxlength: 60, value: b.reading_level || "", placeholder: "For example Age 7-8" });
+		const summary = h("input", { type: "text", maxlength: 300, value: b.summary || "" });
+		const body = h("div", {},
+			h("label", { class: "field" }, h("span", {}, "Title"), title),
+			h("label", { class: "field" }, h("span", {}, "Shelf"), shelf, h("datalist", { id: "es-shelves" }, (shelves || []).map((name) => h("option", { value: name }))), h("small", {}, "Books with the same shelf are grouped together in the library.")),
+			h("label", { class: "field" }, h("span", {}, "Reading level"), level, h("small", {}, "The first number is used as the age when matching books to readers.")),
+			h("label", { class: "field" }, h("span", {}, "One-line summary"), summary));
+		modal("Book details", body, (close) => [
+			h("button", { class: "btn", onclick: close }, "Cancel"),
+			h("button", { class: "btn primary", onclick: () => guard(async () => {
+				await api("update_book", { book: b.name, data: JSON.stringify({ title: title.value, shelf: shelf.value, reading_level: level.value, summary: summary.value }) }, true);
+				close();
+				await viewLibrary();
+			}) }, "Save"),
+		]);
+	}
+
+	async function bookPages(b) {
+		const book = await guard(() => api("get_book", { name: b.name }));
+		if (!book) return;
+		const boxes = (book.page_info || []).map((page) => {
+			const box = h("input", { type: "checkbox", checked: page.read, "data-page": page.page });
+			return h("label", { class: "field check" }, box, h("span", {}, `Page ${page.page}`, h("small", {}, `${page.words} words · “${page.first}…”`)));
+		});
+		modal("Pages to read", h("div", {}, h("p", { class: "meta" }, "Untick pages that should not be read aloud, such as questions or answers."), boxes), (close) => [
+			h("button", { class: "btn", onclick: close }, "Cancel"),
+			h("button", { class: "btn primary", onclick: () => guard(async () => {
+				const skip = boxes.map((label) => label.querySelector("input")).filter((box) => !box.checked).map((box) => Number(box.dataset.page));
+				const saved = await api("set_book_pages", { book: b.name, skip_pages: JSON.stringify(skip) }, true);
+				close();
+				toast(`Saved: ${saved.lines} lines, ${saved.words} words to read.`);
+				await viewLibrary();
+			}) }, "Save"),
+		]);
+	}
+
+	// ------------------------------------------------------------------ word bank
+
+	function viewWords() {
+		const { learning, mastered } = wordBank();
+		const say = (w) => { hush(); speak(w.w, { rate: Math.max(0.6, pref("speech_rate") - 0.15) }); };
+		const chip = (w, cls) => h("button", { class: "chip " + cls, title: "Tap to hear it", onclick: () => say(w) }, w.w, w.h > 1 ? h("small", {}, ` ×${w.h}`) : null);
+		const body = h("div", {},
+			h("h3", {}, "Words to practise"),
+			learning.length ? h("div", { class: "chips" }, learning.map((w) => chip(w, ""))) : h("p", { class: "meta" }, "Nothing to practise. Words you need help with while reading will appear here."),
+			h("h3", { style: "margin-top:18px" }, "Words you know now ⭐"),
+			mastered.length ? h("div", { class: "chips" }, mastered.map((w) => chip(w, "on"))) : h("p", { class: "meta" }, "Say a word correctly three times in practice and it moves here."));
+		modal(`${S.reader.reader_name}'s words`, body, (close) => [
+			h("button", { class: "btn", onclick: close }, "Close"),
+			learning.length ? h("button", { class: "btn primary", onclick: () => { close(); beginWordPractice(learning.slice(0, 10)); } }, "🎤 Practise these words") : null,
+		]);
+	}
+
+	async function beginWordPractice(list) {
+		leaveRun();
+		beep(660, 60);
+		const run = (S.run = { mode: "Word Bank", dead: false, listener: null });
+		document.body.classList.add("in-session");
+		const stage = h("div", { class: "result" });
+		const meter = h("i");
+		show(
+			h("div", { class: "bar" },
+				h("button", { class: "btn icon-btn", "aria-label": "Back to the library", onclick: () => guard(viewLibrary) }, "✕"),
+				h("h1", {}, "My words"), h("div", { class: "meter" }, meter)),
+			h("div", { class: "page" }, stage)
+		);
+		const before = new Set(wordBank().mastered.map((w) => w.key));
+		const results = [];
+		for (let i = 0; i < list.length && !run.dead; i++) {
+			meter.style.width = Math.round((i / list.length) * 100) + "%";
+			const said = await practiseWord(run, { word: list[i].w, say: syllables(list[i].w).length > 1 ? syllables(list[i].w).join("-") : "", meaning: "" }, stage);
+			if (run.dead) return;
+			results.push({ word: list[i].w, right: Boolean(said) });
+		}
+		leaveRun();
+		const reader = await guard(() => api("practise_words", { reader: S.reader.name, results: JSON.stringify(results) }, true));
+		updateReader(reader);
+		const right = results.filter((r) => r.right).length;
+		const fresh = wordBank().mastered.filter((w) => !before.has(w.key)).map((w) => w.w);
+		show(
+			h("div", { class: "bar" }, h("span", { class: "avatar" }, S.reader.avatar || "🦊"), h("h1", {}, "My words")),
+			h("div", { class: "page" }, h("div", { class: "result" },
+				h("div", { class: "hero" }, h("div", { class: "stars" }, "🧠⭐"), h("h2", {}, `You said ${right} of ${results.length} words!`),
+					fresh.length ? h("p", {}, `You know ${fresh.length === 1 ? "this word" : "these words"} now: ${fresh.join(", ")}`) : h("p", {}, "Say a word correctly three times and it joins the words you know.")),
+				h("div", { class: "options modes" }, h("button", { class: "btn primary big", onclick: () => guard(viewLibrary) }, "📚 Back to the library"))))
 		);
 	}
 
@@ -719,15 +1060,26 @@
 	}
 
 	function viewProgress() {
-		const rows = S.progress.map((p) => h("tr", {},
+		const stats = readerStats();
+		const tile = (value, label) => h("div", { class: "tile" }, h("b", {}, value), h("span", {}, label));
+		const reads = stats.reads.filter((p) => p.reader_wpm > 0).slice(0, 20).reverse();
+		const rows = S.progress.slice(0, 15).map((p) => h("tr", {},
 			h("td", {}, String(p.completed_on || "").slice(0, 10)),
 			h("td", {}, h("b", {}, p.book_title), h("br"), MODE_LABEL[p.mode] || p.mode),
 			h("td", {}, p.reader_seconds ? clock(p.reader_seconds) : "–", p.reader_wpm ? h("div", { class: "meta" }, `${Math.round(p.reader_wpm)} words/min`) : null),
 			h("td", {}, p.words_helped ? `${p.words_helped}: ${p.helped_words}` : "none")));
-		const body = rows.length
-			? h("table", { class: "progress" }, h("thead", {}, h("tr", {}, ["Date", "Book", "Time", "Words helped"].map((t) => h("th", {}, t)))), h("tbody", {}, rows))
-			: h("p", {}, "Nothing yet. Finished books will show up here.");
-		modal(`${S.reader.reader_name}'s reading`, body, (close) => [h("button", { class: "btn primary", onclick: close }, "Close")]);
+		const body = h("div", {},
+			h("div", { class: "tiles" }, tile(stats.books, stats.books === 1 ? "book read" : "books read"), tile(stats.minutes, stats.minutes === 1 ? "minute reading" : "minutes reading"), tile(stats.streak, stats.streak === 1 ? "day in a row" : "days in a row"), tile(stats.mastered, stats.mastered === 1 ? "word mastered" : "words mastered")),
+			reads.length > 1 && h("div", { class: "charts" },
+				h("div", {}, h("h3", {}, "Words a minute"), chart(reads.map((p) => p.reader_wpm), "line", "#17807a")),
+				h("div", {}, h("h3", {}, "Words needing help"), chart(reads.map((p) => p.words_helped || 0), "bar", "#e9624a"))),
+			h("h3", {}, "Badges"),
+			h("div", { class: "badges" }, stats.badges.map((b) => h("div", { class: "badge" + (b.earned ? " earned" : ""), title: b.earned ? "Earned" : "Not yet" }, h("span", {}, b.icon), b.title))),
+			h("h3", {}, "Recent reading"),
+			rows.length
+				? h("table", { class: "progress" }, h("thead", {}, h("tr", {}, ["Date", "Book", "Time", "Words helped"].map((t) => h("th", {}, t)))), h("tbody", {}, rows))
+				: h("p", { class: "meta" }, "Nothing yet. Finished books will show up here."));
+		modal(`${S.reader.reader_name}'s reading`, body, (close) => [h("button", { class: "btn primary", onclick: close }, "Close")], true);
 	}
 
 	async function openBook(summary) {
@@ -735,11 +1087,14 @@
 			const book = await api("get_book", { name: summary.name });
 			if (!book.lines.length) return toast("This book has no text to read yet.");
 			S.book = book;
-			const pick = (mode, cls, icon, title, sub) => h("button", { class: "btn " + cls, onclick: () => { close(); beginRun(mode); } }, h("span", { style: "font-size:28px" }, icon), h("span", {}, title, h("small", {}, sub)));
+			let resume = await api("get_resume", { reader: S.reader.name, book: book.name }).catch(() => null);
+			if (resume && !(resume.lines_completed > 0 && resume.lines_completed < book.lines.length)) resume = null;
+			const pick = (mode, cls, icon, title, sub, from) => h("button", { class: "btn " + cls, onclick: () => { close(); beginRun(mode, from); } }, h("span", { style: "font-size:28px" }, icon), h("span", {}, title, h("small", {}, sub)));
 			const close = modal(book.title, h("div", {},
 				book.summary && h("p", {}, book.summary),
 				h("div", { class: "modes" },
-					pick("Read Together", "primary big", "👂🎤", "Read together", "Listen to a few lines, then read them back."),
+					resume && pick(resume.mode, "sun big", "▶", "Carry on where you stopped", `Page ${book.lines[resume.lines_completed].page} · ${MODE_LABEL[resume.mode]}`, resume),
+					pick("Read Together", resume ? "primary" : "primary big", "👂🎤", resume ? "Start again: read together" : "Read together", "Listen to a few lines, then read them back."),
 					pick("Re-read", "", "📖", "I'll read it myself", "Read aloud with help when you get stuck."),
 					pick("Tricky Words", "", "🧩", "Tricky words", "Practise the long and difficult words."),
 					pick("Listen", "", "👂", "Just listen", "Hear the whole story read aloud."))),
@@ -789,7 +1144,7 @@
 		hush();
 	}
 
-	async function beginRun(mode) {
+	async function beginRun(mode, resume) {
 		leaveRun();
 		beep(660, 60); // unlock audio inside the tap that started the run
 		if (mode === "Tricky Words") return beginTricky();
@@ -808,17 +1163,42 @@
 			session: null,
 		});
 		run.totalWords = run.chunks.reduce((n, c) => n + c.words, 0);
+		let startAt = 0;
+		if (resume) {
+			let lines = 0;
+			while (startAt < run.chunks.length && lines + run.chunks[startAt].lines.length <= resume.lines_completed) lines += run.chunks[startAt++].lines.length;
+			if (startAt >= run.chunks.length) startAt = 0;
+			else {
+				run.session = resume.session;
+				run.readerMs = (resume.reader_seconds || 0) * 1000;
+				run.helped = (resume.helped_words || []).slice();
+				if (mode !== "Re-read") {
+					run.narratorSec = resume.narrator_seconds || 0;
+					run.narratedWords = run.chunks.slice(0, startAt).reduce((n, c) => n + c.words, 0);
+				}
+			}
+		}
 		renderReadView(run);
 		try {
-			run.session = (await api("start_session", { reader: S.reader.name, book: S.book.name, mode }, true)).name;
+			if (!run.session) run.session = (await api("start_session", { reader: S.reader.name, book: S.book.name, mode }, true)).name;
 			try { S.pdf = S.book.pdf ? await openPdf(S.book.pdf) : null; } catch (e) { S.pdf = null; }
-			for (run.index = 0; run.index < run.chunks.length && !run.dead; run.index++) {
+			for (run.index = startAt; run.index < run.chunks.length && !run.dead; run.index++) {
 				await playChunk(run, run.chunks[run.index]);
+				if (!run.dead) saveProgress(run);
 			}
 			if (!run.dead) await finishRun(run);
 		} catch (e) {
 			if (!run.dead) { console.error(e); toast(e.message || String(e), 6000); }
 		}
+	}
+
+	/** Remember how far this book has got, so it can be carried on another day. */
+	function saveProgress(run, leaving) {
+		if (run.mode === "Listen" || !run.session || (!leaving && run.index + 1 >= run.chunks.length)) return;
+		// When leaving part-way through a turn, only the turns already finished count as read.
+		const lines = run.chunks.slice(0, leaving ? run.index : run.index + 1).reduce((n, c) => n + c.lines.length, 0);
+		if (leaving && !lines) return;
+		api("save_progress", { session: run.session, data: JSON.stringify({ lines_completed: lines, reader_seconds: run.readerMs / 1000, narrator_seconds: run.narratorSec, helped_words: run.helped }) }, true).catch(() => {});
 	}
 
 	// ------------------------------------------------------------------ reading view
@@ -833,6 +1213,7 @@
 		ui.sheet = h("div", { class: "sheet" }, ui.pagewrap);
 		ui.phase = h("div", { class: "phase" });
 		ui.text = h("div", { class: "text" });
+		ui.hint = h("div", { class: "hint", hidden: true, "aria-live": "polite" });
 		ui.pause = h("button", { class: "btn", onclick: () => togglePause(run) }, "⏸ Pause");
 		ui.again = h("button", { class: "btn", onclick: () => run.replay && run.replay() }, "🔁 Again");
 		ui.help = h("button", { class: "btn sun", onclick: () => run.helpNow && run.helpNow() }, "💡 Help me");
@@ -840,13 +1221,13 @@
 		ui.mic = h("button", { class: "btn small", onclick: () => toggleMic(run) });
 		show(
 			h("div", { class: "bar" },
-				h("button", { class: "btn icon-btn", title: "Back to the library", "aria-label": "Back to the library", onclick: () => { if (window.confirm("Stop reading and go back to the library?")) guard(viewLibrary); } }, "✕"),
+				h("button", { class: "btn icon-btn", title: "Back to the library", "aria-label": "Back to the library", onclick: () => { if (window.confirm("Stop reading and go back to the library? You can carry on later.")) { saveProgress(run, true); guard(viewLibrary); } } }, "✕"),
 				h("h1", {}, S.book.title),
 				h("div", { class: "meter", title: "How far through the book" }, ui.meter),
 				ui.pageLabel,
 				ui.clock),
 			h("div", { class: "read" }, ui.sheet,
-				h("div", { class: "panel" }, ui.phase, ui.text,
+				h("div", { class: "panel" }, ui.phase, ui.hint, ui.text,
 					h("div", { class: "controls" }, ui.pause, ui.again, ui.help, ui.done, h("span", { class: "spacer" }), ui.mic)))
 		);
 		paintMic(run);
@@ -1069,6 +1450,7 @@
 		const chunk = turn.chunk;
 		turn.pointer = pointer;
 		turn.lastMove = performance.now();
+		run.ui.hint.hidden = true;
 		const current = pointer < chunk.expected.length ? chunk.expected[pointer].tok : chunk.tokens.length;
 		chunk.tokens.forEach((t, idx) => t.el.classList.toggle("done", idx < current));
 		if (pointer >= chunk.expected.length) return turn.finish();
@@ -1102,18 +1484,28 @@
 		const turn = run.turn;
 		const token = chunk.tokens[tokIdx];
 		if (!turn || turn.busy || turn.over || !token || !token.parts.length) return;
+		const word = token.text.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, "");
+		const pieces = pref("syllable_hint") ? syllables(word) : [];
+		const hintFirst = pieces.length > 1;
+		token.helps++;
+		if (hintFirst && token.helps === 1) {
+			// First nudge: show the word in syllables and give the reader another go.
+			run.ui.hint.replaceChildren(h("span", {}, "Try it in pieces:"), h("b", {}, pieces.join(" · ")));
+			run.ui.hint.hidden = false;
+			markToken(chunk, tokIdx, "cur"); // keep the word in view now that the hint takes some room
+			turn.lastMove = performance.now();
+			return;
+		}
 		turn.busy = true;
 		if (run.listener) run.listener.stop(); // don't let the microphone hear the narrator
-		token.helps++;
 		token.el.classList.add("helped");
-		const word = token.text.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, "");
 		if (!run.helped.some((w) => w.toLowerCase() === word.toLowerCase())) run.helped.push(word);
 		hush();
 		await speak(word, { rate: Math.max(0.6, pref("speech_rate") - 0.15) });
 		if (run.dead || turn.over) return;
 		turn.busy = false;
 		const current = chunk.expected[turn.pointer].tok;
-		if (tokIdx === current && token.helps >= 2) {
+		if (tokIdx === current && token.helps >= (hintFirst ? 3 : 2)) {
 			let next = turn.pointer;
 			while (next < chunk.expected.length && chunk.expected[next].tok === tokIdx) next++;
 			setPointer(run, next);
@@ -1178,7 +1570,9 @@
 				listening_used: run.listeningUsed ? 1 : 0,
 			}),
 		}, true);
-		viewResults(run, result);
+		const before = new Set(readerStats().badges.filter((b) => b.earned).map((b) => b.id));
+		updateReader(result.reader);
+		viewResults(run, result, before);
 	}
 
 	function practiceOptions(primary) {
@@ -1190,11 +1584,12 @@
 			h("button", { class: "btn", onclick: () => guard(viewLibrary) }, "📚 Back to the library"));
 	}
 
-	function viewResults(run, r) {
+	function viewResults(run, r, badgesBefore) {
 		leaveRun();
 		const share = r.words_total ? r.words_helped / r.words_total : 0;
 		const stars = run.mode === "Listen" ? 0 : share <= 0.02 ? 3 : share <= 0.08 ? 2 : 1;
 		const feedback = h("div", { class: "feedback" }, "…");
+		const newBadges = h("div", { class: "badges new", hidden: true });
 		const longest = Math.max(r.reader_seconds, r.narrator_seconds, 1);
 		const timed = run.mode !== "Listen" && r.reader_seconds > 0;
 		const gapLine = !timed ? "" : r.gap_percent > 0
@@ -1214,6 +1609,7 @@
 					h("div", { class: "barrow you" }, h("span", {}, "You"), h("i", { style: `width:${(r.reader_seconds / longest) * 80}%` })),
 					h("div", { class: "barrow" }, h("span", {}, "Narrator"), h("i", { style: `width:${(r.narrator_seconds / longest) * 80}%` }))),
 				timed && h("p", {}, r.words_helped ? `Words I helped with: ${run.helped.join(", ")}` : "You didn't need help with any words."),
+				newBadges,
 				feedback,
 				r.suggest_practice && h("h3", {}, "What would you like to do next?"),
 				practiceOptions(r.suggest_practice)))
@@ -1221,6 +1617,16 @@
 		api("session_feedback", { session: r.name }, true)
 			.then((f) => (feedback.textContent = f.feedback))
 			.catch(() => feedback.remove());
+		if (badgesBefore) {
+			api("get_progress", { reader: S.reader.name }).then((progress) => {
+				S.progress = progress;
+				const earned = readerStats().badges.filter((b) => b.earned && !badgesBefore.has(b.id));
+				if (!earned.length) return;
+				newBadges.replaceChildren(h("h3", {}, earned.length === 1 ? "New badge!" : "New badges!"), ...earned.map((b) => h("div", { class: "badge earned" }, h("span", {}, b.icon), b.title)));
+				newBadges.hidden = false;
+				cheer("🏅");
+			}).catch(() => {});
+		}
 	}
 
 	// ------------------------------------------------------------------ tricky words
@@ -1289,7 +1695,7 @@
 				over = true;
 				if (run.listener) run.listener.stop();
 				hush();
-				if (said) { cheer("⭐"); setTimeout(resolve, 800); } else resolve();
+				if (said) { cheer("⭐"); setTimeout(() => resolve(true), 800); } else resolve(false);
 			};
 			const listen = () => {
 				if (!SR || over || run.dead) return;
@@ -1313,6 +1719,7 @@
 				status,
 				h("div", { class: "controls", style: "justify-content:center;border:0" },
 					h("button", { class: "btn big sun", onclick: hear }, "🔊 Hear it"),
+					!SR && h("button", { class: "btn big", onclick: () => done(true) }, "✓ I said it"),
 					h("button", { class: "btn big primary", onclick: () => done(false) }, "Next ➜"))
 			);
 			hear();
@@ -1335,7 +1742,7 @@
 	// ------------------------------------------------------------------ go
 
 	window.addEventListener("pagehide", hush);
-	window.ESReading = { tokenize, advance, similar, buildChunks, extractPdf }; // exposed for testing
+	window.ESReading = { tokenize, advance, similar, buildChunks, extractPdf, syllables }; // exposed for testing
 	start().catch((e) => {
 		console.error(e);
 		show(h("div", { class: "page" }, h("div", { class: "hero" }, h("h2", {}, "ES Reading couldn't start"), h("p", {}, e.message || String(e)))));

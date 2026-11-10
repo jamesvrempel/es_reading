@@ -14,6 +14,7 @@ from frappe import _
 from frappe.utils import cint, flt, now_datetime
 
 from es_reading import claude
+from es_reading.es_reading.doctype.reading_book.reading_book import skipped_pages
 from es_reading.install import DEFAULTS
 
 LIBRARIAN_ROLES = {"System Manager", "Reading Librarian"}
@@ -38,7 +39,18 @@ READER_FIELDS = (
 	"lines_per_turn",
 	"silence_seconds",
 	"gap_percent",
+	"reading_age",
+	"syllable_hint",
+	"display_prefs",
 )
+DISPLAY_OPTIONS = {
+	"font": ("default", "lexend"),
+	"size": ("normal", "large", "xlarge"),
+	"spacing": ("normal", "wide"),
+	"background": ("cream", "white", "blue", "yellow", "dark"),
+}
+RESUMABLE_MODES = ("Read Together", "Re-read")
+MASTERED_AFTER = 3
 SKIP_PATTERNS = (
 	re.compile(r"^\W*(page\s*)?\d+(\s*(of|/)\s*\d+)?\W*$", re.I),  # page numbers
 	re.compile(r"_{3,}"),  # blanks to fill in
@@ -104,7 +116,28 @@ def _reader_dict(doc):
 	out = {"name": doc.name}
 	for key in READER_FIELDS:
 		out[key] = doc.get(key)
+	out["word_bank"] = _word_bank(doc)
 	return out
+
+
+def _word_bank(doc):
+	"""{normalised word: {"w": as written, "h": times helped, "r": right in a row, "last": date}}"""
+	try:
+		bank = json.loads(doc.word_bank or "{}")
+		return bank if isinstance(bank, dict) else {}
+	except ValueError:
+		return {}
+
+
+def _word_key(word):
+	return re.sub(r"[^a-z0-9]+", "", str(word).lower().replace("’", "").replace("'", ""))
+
+
+def _store_word_bank(doc, bank):
+	if len(bank) > 400:  # keep the most recent words
+		keep = sorted(bank.items(), key=lambda kv: kv[1].get("last") or "", reverse=True)[:400]
+		bank = dict(keep)
+	doc.db_set("word_bank", json.dumps(bank, separators=(",", ":")), update_modified=False)
 
 
 def _readers():
@@ -127,6 +160,8 @@ def _books():
 			"status",
 			"published",
 			"reading_level",
+			"shelf",
+			"skip_pages",
 			"summary",
 			"page_count",
 			"word_count",
@@ -205,6 +240,21 @@ def save_reader(data):
 		doc.silence_seconds = _clamp(cint(data["silence_seconds"]), 2, 20, 0)
 	if "gap_percent" in data:
 		doc.gap_percent = _clamp(cint(data["gap_percent"]), 5, 300, 0)
+	if "reading_age" in data:
+		doc.reading_age = _clamp(cint(data["reading_age"]), 4, 18, 0) if cint(data["reading_age"]) else 0
+	if "syllable_hint" in data:
+		doc.syllable_hint = 1 if cint(data["syllable_hint"]) else 0
+	elif doc.is_new():
+		doc.syllable_hint = 1
+	if "display_prefs" in data:
+		chosen = data["display_prefs"]
+		if isinstance(chosen, str):
+			try:
+				chosen = json.loads(chosen or "{}")
+			except ValueError:
+				chosen = {}
+		chosen = chosen if isinstance(chosen, dict) else {}
+		doc.display_prefs = json.dumps({k: chosen[k] for k, allowed in DISPLAY_OPTIONS.items() if chosen.get(k) in allowed})
 	doc.save(ignore_permissions=True)
 	return _reader_dict(doc)
 
@@ -238,7 +288,7 @@ def get_progress(reader):
 			"reader_wpm",
 		],
 		order_by="completed_on desc",
-		limit=50,
+		limit=300,
 	)
 	titles = {}
 	for row in sessions:
@@ -257,21 +307,69 @@ def get_book(name):
 	doc = frappe.get_doc("Reading Book", name)
 	if not _is_librarian() and not (doc.status == "Ready" and doc.published):
 		frappe.throw(_("That book is not available."), frappe.PermissionError)
-	return {
+	skipped = skipped_pages(doc.skip_pages)
+	readable = [line for line in doc.lines if not line.skip and (line.text or "").strip()]
+	out = {
 		"name": doc.name,
 		"title": doc.title,
 		"pdf": doc.pdf,
 		"status": doc.status,
 		"reading_level": doc.reading_level,
+		"shelf": doc.shelf,
 		"summary": doc.summary,
 		"page_count": doc.page_count,
 		"lines": [
 			{"page": line.page_no or 1, "text": line.text, "x": line.x, "y": line.y, "w": line.w, "h": line.h}
-			for line in doc.lines
-			if not line.skip and (line.text or "").strip()
+			for line in readable
+			if (line.page_no or 1) not in skipped
 		],
 		"tricky_words": [{"word": w.word, "say": w.say, "meaning": w.meaning} for w in doc.tricky_words],
 	}
+	if _is_librarian():
+		pages = {}
+		for line in readable:
+			page = pages.setdefault(line.page_no or 1, {"page": line.page_no or 1, "lines": 0, "words": 0, "first": ""})
+			page["lines"] += 1
+			page["words"] += len(line.text.split())
+			page["first"] = page["first"] or line.text.strip()[:70]
+		for page in pages.values():
+			page["read"] = page["page"] not in skipped
+		out["page_info"] = [pages[n] for n in sorted(pages)]
+	return out
+
+
+@frappe.whitelist(methods=["POST"])
+def update_book(book, data):
+	"""Librarian: change a book's title, shelf, reading level or summary."""
+	_require_librarian()
+	doc = frappe.get_doc("Reading Book", book)
+	data = frappe.parse_json(data) or {}
+	clean = lambda value, size: frappe.utils.strip_html(str(value or "")).strip()[:size]  # noqa: E731
+	if "title" in data and clean(data["title"], 140):
+		doc.title = clean(data["title"], 140)
+	if "shelf" in data:
+		doc.shelf = clean(data["shelf"], 60)
+	if "reading_level" in data:
+		doc.reading_level = clean(data["reading_level"], 60)
+	if "summary" in data:
+		doc.summary = clean(data["summary"], 300)
+	doc.flags.cover_from_scan = True
+	doc.save(ignore_permissions=True)
+	return {"name": doc.name, "title": doc.title, "shelf": doc.shelf, "reading_level": doc.reading_level, "summary": doc.summary}
+
+
+@frappe.whitelist(methods=["POST"])
+def set_book_pages(book, skip_pages):
+	"""Librarian: choose which pages are left out of the reading."""
+	_require_librarian()
+	doc = frappe.get_doc("Reading Book", book)
+	pages = frappe.parse_json(skip_pages) or []
+	doc.skip_pages = ", ".join(str(cint(n)) for n in pages if cint(n) > 0)
+	doc.flags.cover_from_scan = True
+	doc.save(ignore_permissions=True)
+	if not doc.line_count:
+		frappe.throw(_("Leave at least one page to read."))
+	return {"name": doc.name, "skip_pages": doc.skip_pages, "lines": doc.line_count, "words": doc.word_count}
 
 
 @frappe.whitelist(methods=["POST"])
@@ -485,6 +583,73 @@ def start_session(reader, book, mode="Read Together"):
 	return {"name": doc.name}
 
 
+def _helped_list(words):
+	cleaned = [re.sub(r"^[^A-Za-z0-9]+|[^A-Za-z0-9]+$", "", frappe.utils.strip_html(str(w)))[:40] for w in (words or [])]
+	return [w for w in cleaned if w][:200]
+
+
+@frappe.whitelist(methods=["POST"])
+def save_progress(session, data):
+	"""Remember how far an unfinished book has got, so it can be carried on later."""
+	doc = _own_session(session)
+	if doc.status != "In Progress":
+		return {"ok": False}
+	data = frappe.parse_json(data) or {}
+	helped = _helped_list(data.get("helped_words"))
+	frappe.db.set_value(
+		"Reading Session",
+		doc.name,
+		{
+			"lines_completed": _clamp(cint(data.get("lines_completed")), 0, 100000, 0),
+			"reader_seconds": _clamp(flt(data.get("reader_seconds")), 0, 6 * 3600, 0),
+			"narrator_seconds": _clamp(flt(data.get("narrator_seconds")), 0, 6 * 3600, 0),
+			"words_helped": len(helped),
+			"helped_words": ", ".join(helped)[:2000],
+		},
+	)
+	return {"ok": True}
+
+
+@frappe.whitelist()
+def get_resume(reader, book):
+	"""The reader's most recent unfinished session for this book, if any."""
+	reader_doc = _own_reader(reader)
+	rows = frappe.get_all(
+		"Reading Session",
+		filters={
+			"reader": reader_doc.name,
+			"book": book,
+			"status": "In Progress",
+			"mode": ("in", RESUMABLE_MODES),
+			"lines_completed": (">", 0),
+			"started_on": (">", frappe.utils.add_days(now_datetime(), -30)),
+		},
+		fields=["name", "mode", "lines_completed", "reader_seconds", "narrator_seconds", "helped_words"],
+		order_by="modified desc",
+		limit=1,
+	)
+	if not rows:
+		return None
+	row = rows[0]
+	row["session"] = row.pop("name")
+	row["helped_words"] = [w for w in (row.get("helped_words") or "").split(", ") if w]
+	return row
+
+
+@frappe.whitelist(methods=["POST"])
+def practise_words(reader, results):
+	"""Record word-bank practice: a word said correctly three times in a row is mastered."""
+	doc = _own_reader(reader)
+	bank = _word_bank(doc)
+	for item in (frappe.parse_json(results) or [])[:100]:
+		key = _word_key(item.get("word"))
+		if key in bank:
+			bank[key]["r"] = min(cint(bank[key].get("r")) + 1, MASTERED_AFTER) if item.get("right") else 0
+			bank[key]["last"] = frappe.utils.today()
+	_store_word_bank(doc, bank)
+	return _reader_dict(frappe.get_doc("Reader Profile", doc.name))
+
+
 @frappe.whitelist(methods=["POST"])
 def finish_session(session, data):
 	"""Record the timings measured in the browser and work out the reading-time gap."""
@@ -496,7 +661,7 @@ def finish_session(session, data):
 	doc.narrator_seconds = _clamp(flt(data.get("narrator_seconds")), 0, 6 * 3600, 0)
 	doc.words_total = _clamp(cint(data.get("words_total")), 0, 200000, 0)
 	doc.listening_used = 1 if cint(data.get("listening_used")) else 0
-	helped = [frappe.utils.strip_html(str(w))[:40] for w in (data.get("helped_words") or [])][:200]
+	helped = _helped_list(data.get("helped_words"))
 	doc.words_helped = len(helped)
 	doc.helped_words = ", ".join(helped)[:2000]
 
@@ -512,6 +677,18 @@ def finish_session(session, data):
 	doc.completed_on = now_datetime()
 	doc.save(ignore_permissions=True)
 
+	if helped:
+		bank = _word_bank(reader_doc)
+		for word in helped:
+			key = _word_key(word)
+			if not key:
+				continue
+			entry = bank.setdefault(key, {"w": word.lower(), "h": 0, "r": 0})
+			entry["h"] = cint(entry.get("h")) + 1
+			entry["r"] = 0  # needing help again puts a mastered word back into practice
+			entry["last"] = frappe.utils.today()
+		_store_word_bank(reader_doc, bank)
+
 	threshold = cint(reader_doc.gap_percent) or _defaults()["gap_percent"]
 	return {
 		"name": doc.name,
@@ -524,6 +701,7 @@ def finish_session(session, data):
 		"words_helped": doc.words_helped,
 		"reader_wpm": round(doc.reader_wpm),
 		"narrator_wpm": round(doc.narrator_wpm),
+		"reader": _reader_dict(frappe.get_doc("Reader Profile", reader_doc.name)),
 	}
 
 

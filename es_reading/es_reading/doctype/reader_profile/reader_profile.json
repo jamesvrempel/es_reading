@@ -16,7 +16,13 @@
   "turns_section",
   "lines_per_turn",
   "silence_seconds",
-  "gap_percent"
+  "gap_percent",
+  "help_section",
+  "reading_age",
+  "syllable_hint",
+  "display_prefs",
+  "words_section",
+  "word_bank"
  ],
  "fields": [
   {
@@ -85,10 +91,46 @@
    "fieldname": "gap_percent",
    "fieldtype": "Int",
    "label": "Reading time gap that triggers practice options (%)"
+  },
+  {
+   "fieldname": "help_section",
+   "fieldtype": "Section Break",
+   "label": "Help and display"
+  },
+  {
+   "description": "Optional. Books around this level are marked as just right. Left blank, the app estimates it from the books read.",
+   "fieldname": "reading_age",
+   "fieldtype": "Int",
+   "label": "Reading level (age)"
+  },
+  {
+   "default": "1",
+   "fieldname": "syllable_hint",
+   "fieldtype": "Check",
+   "label": "Show the syllables before saying a word"
+  },
+  {
+   "description": "Font, text size, spacing and background chosen in the app.",
+   "fieldname": "display_prefs",
+   "fieldtype": "Small Text",
+   "label": "Display preferences",
+   "read_only": 1
+  },
+  {
+   "fieldname": "words_section",
+   "fieldtype": "Section Break",
+   "label": "Word bank"
+  },
+  {
+   "description": "Words this reader needed help with, and how practice is going.",
+   "fieldname": "word_bank",
+   "fieldtype": "Long Text",
+   "label": "Word bank",
+   "read_only": 1
   }
  ],
  "links": [],
- "modified": "2026-11-10 16:00:00.000000",
+ "modified": "2026-11-10 23:00:00.000000",
  "modified_by": "Administrator",
  "module": "ES Reading",
  "name": "Reader Profile",

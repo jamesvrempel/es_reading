@@ -5,9 +5,50 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex">
 <title>ES Reading</title>
+{% if site_favicon %}<link rel="icon" href="{{ site_favicon | e }}">{% endif %}
 <link rel="stylesheet" href="/assets/es_reading/css/es_reading.css?v={{ app_version }}">
 </head>
 <body>
+{%- macro site_link(item) -%}
+	{%- if item.children -%}
+	<details class="drop">
+		<summary>{{ item.label | e }}</summary>
+		<div class="menu">
+			{%- for child in item.children %}
+			<a href="{{ child.url | e }}"{% if child.new_tab %} target="_blank" rel="noopener"{% endif %}>{{ child.label | e }}</a>
+			{%- endfor %}
+		</div>
+	</details>
+	{%- else -%}
+	<a href="{{ item.url | e }}"{% if item.active %} class="active" aria-current="page"{% endif %}{% if item.new_tab %} target="_blank" rel="noopener"{% endif %}>{{ item.label | e }}</a>
+	{%- endif -%}
+{%- endmacro %}
+<nav class="sitebar" aria-label="Site menu">
+	<div class="sitebar-inner">
+		<a class="brand" href="/" aria-label="Home">{{ site_brand_html | safe }}</a>
+		<button type="button" class="sitebar-toggle" aria-label="Menu" aria-expanded="false">☰</button>
+		<div class="sitebar-links">
+			{% for item in site_items_left %}{{ site_link(item) }}{% endfor %}
+			<span class="grow"></span>
+			{% if site_search %}
+			<form class="site-search" action="/search" method="get" role="search">
+				<input type="search" name="q" placeholder="Search..." aria-label="Search">
+			</form>
+			{% endif %}
+			{% for item in site_items_right %}{{ site_link(item) }}{% endfor %}
+			<details class="drop user">
+				<summary aria-label="{{ site_user.full_name | e }}" title="{{ site_user.full_name | e }}">
+					{%- if site_user.image %}<img src="{{ site_user.image | e }}" alt="">{% else %}<span class="initials">{{ site_user.initials | e }}</span>{% endif -%}
+				</summary>
+				<div class="menu right">
+					<a href="/me">My Account</a>
+					{% if site_user.is_desk_user %}<a href="/app">Switch to Desk</a>{% endif %}
+					<a href="/?cmd=web_logout">Log out</a>
+				</div>
+			</details>
+		</div>
+	</div>
+</nav>
 <div id="app" aria-live="polite"><p class="loading">Opening the library…</p></div>
 <script>
 window.ES_READING = {

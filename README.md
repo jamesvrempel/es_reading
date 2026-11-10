@@ -52,6 +52,10 @@ The Desk has an **ES Reading** workspace (visible to System Managers and Reading
 shortcuts to the app, books, readers and sessions, four number cards, a weekly sessions chart and
 links to the settings.
 
+The `/reading` page carries the website's own top menu (logo, search, the links from **Website
+Settings → Top Bar** and the account menu), so changes made there show up in the app. The menu is
+hidden while a child is reading so nothing distracts from the page.
+
 To make `/reading` the site's front page, set **Website Settings → Home Page** to `reading`.
 
 ## Who can do what

@@ -6,3 +6,8 @@ app_email = ""
 app_license = "MIT"
 
 after_install = "es_reading.install.after_install"
+after_migrate = "es_reading.install.ensure_roles"
+
+scheduler_events = {
+	"weekly": ["es_reading.summary.send_weekly_summaries"],
+}

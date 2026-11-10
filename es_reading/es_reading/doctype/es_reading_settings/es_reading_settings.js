@@ -15,6 +15,15 @@ frappe.ui.form.on("ES Reading Settings", {
 				},
 			});
 		});
+		frm.add_custom_button(__("Send me a sample weekly summary"), () => {
+			frappe.call({
+				method: "es_reading.summary.send_sample",
+				callback(r) {
+					const result = r.message || {};
+					frappe.msgprint({ title: result.ok ? __("Sent") : __("Nothing to send"), indicator: result.ok ? "green" : "orange", message: frappe.utils.escape_html(result.message || "") });
+				},
+			});
+		});
 		frm.add_custom_button(__("Open ES Reading"), () => window.open("/reading", "_blank"));
 	},
 });

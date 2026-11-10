@@ -6,18 +6,25 @@ ignore_permissions after that check. Books are managed by System Managers and Re
 """
 
 import base64
+import html
+import io
 import json
+import posixpath
+import random
 import re
+import zipfile
+from urllib.parse import unquote
 
 import frappe
 from frappe import _
 from frappe.utils import cint, flt, now_datetime
 
-from es_reading import claude
+from es_reading import claude, narration, summary
 from es_reading.es_reading.doctype.reading_book.reading_book import skipped_pages
 from es_reading.install import DEFAULTS
 
 LIBRARIAN_ROLES = {"System Manager", "Reading Librarian"}
+TEACHER_ROLES = {"System Manager", "Reading Teacher"}
 MODES = ("Read Together", "Re-read", "Tricky Words", "Listen")
 COUNTRIES = (
 	"Australia",
@@ -41,6 +48,7 @@ READER_FIELDS = (
 	"gap_percent",
 	"reading_age",
 	"syllable_hint",
+	"record_reading",
 	"display_prefs",
 )
 DISPLAY_OPTIONS = {
@@ -117,6 +125,20 @@ def _reader_dict(doc):
 	for key in READER_FIELDS:
 		out[key] = doc.get(key)
 	out["word_bank"] = _word_bank(doc)
+	out["classes"] = _reader_classes(doc.name)
+	return out
+
+
+def _reader_classes(reader):
+	out = []
+	for name in frappe.get_all("Reading Class Member", filters={"reader": reader, "parenttype": "Reading Class"}, pluck="parent"):
+		out.append(
+			{
+				"name": name,
+				"class_name": frappe.db.get_value("Reading Class", name, "class_name"),
+				"books": frappe.get_all("Reading Class Book", filters={"parent": name, "parenttype": "Reading Class"}, pluck="book"),
+			}
+		)
 	return out
 
 
@@ -162,6 +184,7 @@ def _books():
 			"reading_level",
 			"shelf",
 			"skip_pages",
+			"source_type",
 			"summary",
 			"page_count",
 			"word_count",
@@ -191,6 +214,12 @@ def get_bootstrap():
 		"guest": guest,
 		"is_librarian": False if guest else _is_librarian(),
 		"ai_enabled": False if guest else claude.is_configured(),
+		"is_teacher": False if guest else bool(TEACHER_ROLES & set(frappe.get_roles())),
+		"narration_enabled": narration.is_configured(),
+		"weekly_email": {
+			"offered": bool(not guest and cint(frappe.db.get_single_value("ES Reading Settings", "send_weekly_summary"))),
+			"on": bool(not guest and summary.family_wants_email(frappe.session.user)),
+		},
 		"defaults": _defaults(),
 		"countries": COUNTRIES,
 		"readers": [] if guest else _readers(),
@@ -242,6 +271,8 @@ def save_reader(data):
 		doc.gap_percent = _clamp(cint(data["gap_percent"]), 5, 300, 0)
 	if "reading_age" in data:
 		doc.reading_age = _clamp(cint(data["reading_age"]), 4, 18, 0) if cint(data["reading_age"]) else 0
+	if "record_reading" in data:
+		doc.record_reading = 1 if cint(data["record_reading"]) else 0
 	if "syllable_hint" in data:
 		doc.syllable_hint = 1 if cint(data["syllable_hint"]) else 0
 	elif doc.is_new():
@@ -263,6 +294,7 @@ def save_reader(data):
 def delete_reader(name):
 	"""Remove a reader and all of their reading history."""
 	doc = _own_reader(name)
+	frappe.db.delete("Reading Class Member", {"reader": doc.name})
 	frappe.db.delete("Reading Session", {"reader": doc.name})
 	frappe.delete_doc("Reader Profile", doc.name, ignore_permissions=True, force=True)
 	return {"ok": True}
@@ -286,6 +318,8 @@ def get_progress(reader):
 			"words_helped",
 			"helped_words",
 			"reader_wpm",
+			"quiz_correct",
+			"quiz_total",
 		],
 		order_by="completed_on desc",
 		limit=300,
@@ -324,6 +358,11 @@ def get_book(name):
 			if (line.page_no or 1) not in skipped
 		],
 		"tricky_words": [{"word": w.word, "say": w.say, "meaning": w.meaning} for w in doc.tricky_words],
+		"questions": [
+			{"question": q.question, "options": [q.option_a, q.option_b, q.option_c], "answer": "ABC".index(q.correct or "A")}
+			for q in doc.questions
+			if q.question and q.option_a and q.option_b and q.option_c
+		],
 	}
 	if _is_librarian():
 		pages = {}
@@ -383,8 +422,12 @@ def create_book(title=None):
 	limit = _defaults()["max_pdf_mb"]
 	if len(content) > limit * 1024 * 1024:
 		frappe.throw(_("That PDF is larger than {0} MB.").format(limit))
+	is_epub = content[:2] == b"PK" and (upload.filename or "").lower().endswith(".epub")
+	if is_epub:
+		epub_title, text = _epub_to_text(content)
+		return _create_text_book(title or epub_title or (upload.filename or "Book")[:-5], text, "EPUB")
 	if not content.lstrip()[:5].startswith(b"%PDF"):
-		frappe.throw(_("That file is not a PDF."))
+		frappe.throw(_("That file is not a PDF or an EPUB."))
 
 	filename = re.sub(r"[^A-Za-z0-9._ -]", "", upload.filename or "book.pdf").strip() or "book.pdf"
 	if not filename.lower().endswith(".pdf"):
@@ -407,6 +450,91 @@ def create_book(title=None):
 	file_doc.insert(ignore_permissions=True)
 	book.db_set("pdf", file_doc.file_url)
 	return {"name": book.name, "title": book.title, "pdf": file_doc.file_url}
+
+
+WORDS_PER_LINE = 11
+LINES_PER_PAGE = 14
+MAX_TEXT_CHARS = 300000
+
+
+def _text_to_lines(text):
+	"""Lay plain text out as short lines on pages. A form feed starts a new page (used between chapters)."""
+	out = []
+	page = 0
+	for section in str(text).replace("\r\n", "\n").split("\f"):
+		paragraphs = [re.sub(r"\s+", " ", p).strip() for p in re.split(r"\n\s*\n", section)]
+		if len([p for p in paragraphs if p]) <= 1 and "\n" in section.strip():
+			paragraphs = [re.sub(r"\s+", " ", p).strip() for p in section.split("\n")]
+		lines = []
+		for paragraph in paragraphs:
+			words = paragraph.split()
+			for i in range(0, len(words), WORDS_PER_LINE):
+				lines.append(" ".join(words[i : i + WORDS_PER_LINE]))
+		for i in range(0, len(lines), LINES_PER_PAGE):
+			page += 1
+			out.extend((page, line) for line in lines[i : i + LINES_PER_PAGE])
+	return out
+
+
+def _create_text_book(title, text, source_type):
+	text = str(text or "")
+	if len(text) > MAX_TEXT_CHARS:
+		frappe.throw(_("That text is too long. The limit is {0} characters.").format(MAX_TEXT_CHARS))
+	lines = _text_to_lines(text)
+	if not any(not _should_skip(line) for _page, line in lines):
+		frappe.throw(_("No text to read was found."))
+	title = frappe.utils.strip_html(str(title or "")).strip()[:140] or _("Untitled")
+	book = frappe.get_doc({"doctype": "Reading Book", "title": title, "status": "Ready", "source_type": source_type})
+	for page, line in lines:
+		book.append("lines", {"page_no": page, "text": line[:1000], "skip": 1 if _should_skip(line) else 0})
+	book.page_count = lines[-1][0]
+	book.insert(ignore_permissions=True)
+	if claude.is_configured():
+		frappe.enqueue("es_reading.claude.prepare_book", queue="long", timeout=900, enqueue_after_commit=True, book=book.name)
+	return {"name": book.name, "title": book.title, "pdf": None, "status": "Ready", "lines": book.line_count, "words": book.word_count}
+
+
+@frappe.whitelist(methods=["POST"])
+def create_text_book(title, text):
+	"""Librarian: make a book from pasted or typed text."""
+	_require_librarian()
+	return _create_text_book(title, text, "Text")
+
+
+def _epub_to_text(content):
+	"""Pull the title and the chapter text out of an EPUB file. Pictures are not kept."""
+	try:
+		archive = zipfile.ZipFile(io.BytesIO(content))
+		infos = archive.infolist()
+		if len(infos) > 3000 or sum(i.file_size for i in infos) > 60 * 1024 * 1024:
+			frappe.throw(_("That EPUB is too large."))
+		names = set(archive.namelist())
+		container = archive.read("META-INF/container.xml").decode("utf-8", "ignore")
+		opf_path = re.search(r'full-path="([^"]+)"', container).group(1)
+		opf = archive.read(opf_path).decode("utf-8", "ignore")
+	except frappe.ValidationError:
+		raise
+	except Exception:
+		frappe.throw(_("That EPUB could not be opened."))
+	base = posixpath.dirname(opf_path)
+	title = re.search(r"<dc:title[^>]*>(.*?)</dc:title>", opf, re.S)
+	items = {}
+	for tag in re.findall(r"<item\b[^>]*>", opf):
+		item_id, href = re.search(r'\bid="([^"]+)"', tag), re.search(r'\bhref="([^"]+)"', tag)
+		if item_id and href:
+			items[item_id.group(1)] = href.group(1)
+	chapters = []
+	for idref in re.findall(r'<itemref\b[^>]*\bidref="([^"]+)"', opf):
+		path = posixpath.normpath(posixpath.join(base, unquote(items.get(idref, "").split("#")[0])))
+		if path not in names or not path.lower().endswith((".xhtml", ".html", ".htm")):
+			continue
+		markup = archive.read(path).decode("utf-8", "ignore")
+		markup = re.sub(r"(?is)<(head|script|style|nav)\b.*?</\1>", " ", markup)
+		markup = re.sub(r"(?i)<br\s*/?>|</(p|div|h[1-6]|li|tr|blockquote|section)>", "\n\n", markup)
+		text = html.unescape(re.sub(r"<[^>]+>", " ", markup))
+		if text.strip():
+			chapters.append(text)
+	return (html.unescape(re.sub(r"<[^>]+>", "", title.group(1))).strip() if title else ""), "\f".join(chapters)
 
 
 COVER_TYPES = {"jpg": "JPEG", "jpeg": "JPEG", "png": "PNG", "webp": "WEBP", "gif": "GIF"}
@@ -554,6 +682,8 @@ def set_book_published(book, published):
 def delete_book(book):
 	_require_librarian()
 	frappe.db.delete("Reading Session", {"book": book})
+	frappe.db.delete("Reading Class Book", {"book": book})
+	narration.delete_for_book(book)
 	frappe.delete_doc("Reading Book", book, ignore_permissions=True, force=True)
 	return {"ok": True}
 
@@ -714,3 +844,218 @@ def session_feedback(session):
 	if not doc.feedback:
 		doc.db_set("feedback", claude.session_feedback(doc))
 	return {"feedback": doc.feedback}
+
+
+@frappe.whitelist(methods=["POST"])
+def save_quiz(session, correct, total):
+	"""Record how the reader went on the questions about the story."""
+	doc = _own_session(session)
+	total = _clamp(cint(total), 0, 20, 0)
+	frappe.db.set_value("Reading Session", doc.name, {"quiz_total": total, "quiz_correct": _clamp(cint(correct), 0, total, 0)})
+	return {"ok": True}
+
+
+# --------------------------------------------------------------------------- recorded narrator voice
+
+
+@frappe.whitelist(allow_guest=True)
+def get_narration(book, country=None, gender=None):
+	"""Clips recorded for this book in the voice that matches the reader's accent and gender."""
+	_require_access()
+	if not narration.is_configured():
+		return {}
+	voice = narration.voice_for(country, gender)
+	doc = narration.get_doc_for(book, voice)
+	if not doc or doc.status == "Queued":
+		return {}
+	return {"voice": voice, "clips": narration._clips(doc)}
+
+
+@frappe.whitelist()
+def narration_status(book):
+	_require_librarian()
+	rows = frappe.get_all("Reading Narration", filters={"book": book}, fields=["voice", "status", "clip_count", "characters", "note"])
+	return {"enabled": narration.is_configured(), "voices": [{"country": c, "gender": g, "voice": v} for (c, g), v in narration.VOICES.items()], "recorded": rows}
+
+
+@frappe.whitelist(methods=["POST"])
+def record_narration(book, voices, sentences):
+	"""Librarian: queue the narrator recording for a book. `sentences` are the texts the page reads aloud."""
+	_require_librarian()
+	if not narration.is_configured():
+		frappe.throw(_("Add an Azure Speech key in ES Reading Settings first."))
+	doc = frappe.get_doc("Reading Book", book)
+	clean = lambda text: re.sub(r"[^a-z0-9]+", " ", str(text).lower()).strip()  # noqa: E731
+	book_text = " " + clean(" ".join(line.text or "" for line in doc.lines)) + " "
+	wanted = []
+	for text in (frappe.parse_json(sentences) or [])[:4000]:
+		text = re.sub(r"\s+", " ", str(text)).strip()
+		# Only text that really is in this book may be sent to the voice service.
+		if text and len(text) <= 1500 and (" " + clean(text) + " ") in book_text:
+			wanted.append(text)
+	if not wanted:
+		frappe.throw(_("No sentences from this book were supplied."))
+	queued = []
+	for pair in (frappe.parse_json(voices) or [])[:16]:
+		key = (pair[0], pair[1]) if isinstance(pair, list | tuple) and len(pair) == 2 else None
+		if key not in narration.VOICES:
+			continue
+		record = narration.get_doc_for(doc.name, narration.VOICES[key], create=True)
+		record.db_set({"status": "Queued", "note": ""})
+		frappe.enqueue("es_reading.narration.record", queue="long", timeout=7200, enqueue_after_commit=True, narration=record.name, sentences=wanted)
+		queued.append(record.voice)
+	if not queued:
+		frappe.throw(_("Choose at least one voice."))
+	return {"queued": queued, "sentences": len(wanted), "characters": sum(len(t) for t in wanted)}
+
+
+# --------------------------------------------------------------------------- weekly email preference
+
+
+@frappe.whitelist(methods=["POST"])
+def set_weekly_email(on):
+	_require_login()
+	frappe.defaults.set_user_default(summary.PREF_KEY, "1" if cint(on) else "0", frappe.session.user)
+	return {"on": bool(cint(on))}
+
+
+# --------------------------------------------------------------------------- classes
+
+
+def _require_teacher():
+	_require_login()
+	if not TEACHER_ROLES & set(frappe.get_roles()):
+		frappe.throw(_("Only a teacher can manage classes."), frappe.PermissionError)
+
+
+def _own_class(name):
+	_require_teacher()
+	doc = frappe.get_doc("Reading Class", name)
+	if doc.teacher != frappe.session.user and "System Manager" not in frappe.get_roles():
+		frappe.throw(_("That class belongs to another teacher."), frappe.PermissionError)
+	return doc
+
+
+def _class_dict(doc):
+	return {
+		"name": doc.name,
+		"class_name": doc.class_name,
+		"join_code": doc.join_code,
+		"members": len(doc.members),
+		"books": [row.book for row in doc.books],
+	}
+
+
+@frappe.whitelist()
+def get_classes():
+	_require_teacher()
+	names = frappe.get_all("Reading Class", filters={"teacher": frappe.session.user}, order_by="class_name asc", pluck="name")
+	return [_class_dict(frappe.get_doc("Reading Class", name)) for name in names]
+
+
+@frappe.whitelist(methods=["POST"])
+def save_class(class_name, name=None):
+	_require_teacher()
+	class_name = frappe.utils.strip_html(str(class_name or "")).strip()[:80]
+	if not class_name:
+		frappe.throw(_("Please give the class a name."))
+	if name:
+		doc = _own_class(name)
+	else:
+		if frappe.db.count("Reading Class", {"teacher": frappe.session.user}) >= 30:
+			frappe.throw(_("You can have up to 30 classes."))
+		doc = frappe.new_doc("Reading Class")
+		doc.teacher = frappe.session.user
+		for _attempt in range(20):
+			code = "".join(random.SystemRandom().choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _i in range(6))
+			if not frappe.db.exists("Reading Class", {"join_code": code}):
+				doc.join_code = code
+				break
+	doc.class_name = class_name
+	doc.save(ignore_permissions=True)
+	return _class_dict(doc)
+
+
+@frappe.whitelist(methods=["POST"])
+def delete_class(name):
+	doc = _own_class(name)
+	frappe.delete_doc("Reading Class", doc.name, ignore_permissions=True, force=True)
+	return {"ok": True}
+
+
+@frappe.whitelist(methods=["POST"])
+def set_class_books(name, books):
+	doc = _own_class(name)
+	doc.set("books", [])
+	for book in dict.fromkeys(frappe.parse_json(books) or []):
+		if frappe.db.exists("Reading Book", book):
+			doc.append("books", {"book": book})
+	doc.save(ignore_permissions=True)
+	return _class_dict(doc)
+
+
+@frappe.whitelist()
+def class_report(name):
+	"""Teacher: each reader in the class with their recent reading and assigned-book progress."""
+	doc = _own_class(name)
+	since = frappe.utils.add_days(now_datetime(), -7)
+	assigned = [row.book for row in doc.books]
+	rows = []
+	for member in doc.members:
+		reader = frappe.db.get_value("Reader Profile", member.reader, ["reader_name", "avatar"], as_dict=True)
+		if not reader:
+			continue
+		sessions = frappe.get_all(
+			"Reading Session",
+			filters={"reader": member.reader, "status": "Completed", "mode": ("in", RESUMABLE_MODES)},
+			fields=["book", "completed_on", "reader_seconds", "words_helped", "words_total", "reader_wpm"],
+			order_by="completed_on desc",
+			limit=500,
+		)
+		week = [s for s in sessions if s.completed_on and s.completed_on >= since]
+		done = {s.book for s in sessions}
+		rows.append(
+			{
+				"reader": member.reader,
+				"reader_name": reader.reader_name,
+				"avatar": reader.avatar,
+				"books_read": len(done),
+				"minutes_week": round(sum(s.reader_seconds or 0 for s in week) / 60),
+				"sessions_week": len(week),
+				"words_helped_week": sum(cint(s.words_helped) for s in week),
+				"last_read": str(sessions[0].completed_on)[:10] if sessions else "",
+				"latest_wpm": round(sessions[0].reader_wpm or 0) if sessions else 0,
+				"assigned_done": [book for book in assigned if book in done],
+			}
+		)
+	rows.sort(key=lambda r: (r["reader_name"] or "").lower())
+	return dict(_class_dict(doc), readers=rows)
+
+
+@frappe.whitelist(methods=["POST"])
+def join_class(reader, code):
+	"""Family: add one of their readers to a class using the teacher's code."""
+	doc = _own_reader(reader)
+	attempts_key = f"es_reading_join:{frappe.session.user}"
+	attempts = cint(frappe.cache.get_value(attempts_key))
+	if attempts >= 20:
+		frappe.throw(_("Too many attempts. Please try again in an hour."))
+	code = re.sub(r"[^A-Z0-9]", "", str(code or "").upper())
+	name = frappe.db.get_value("Reading Class", {"join_code": code}) if len(code) == 6 else None
+	if not name:
+		frappe.cache.set_value(attempts_key, attempts + 1, expires_in_sec=3600)
+		frappe.throw(_("That class code was not found. Please check it with the teacher."))
+	cls = frappe.get_doc("Reading Class", name)
+	if doc.name not in [m.reader for m in cls.members]:
+		if len(cls.members) >= 200:
+			frappe.throw(_("That class is full."))
+		cls.append("members", {"reader": doc.name, "joined_on": frappe.utils.today()})
+		cls.save(ignore_permissions=True)
+	return _reader_dict(doc)
+
+
+@frappe.whitelist(methods=["POST"])
+def leave_class(reader, name):
+	doc = _own_reader(reader)
+	frappe.db.delete("Reading Class Member", {"parent": name, "parenttype": "Reading Class", "reader": doc.name})
+	return _reader_dict(doc)

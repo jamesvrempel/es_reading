@@ -100,7 +100,7 @@
 	// ------------------------------------------------------------------ guest mode (no account)
 	// With "Sign-up not required" on, a guest's readers and progress live in this browser only.
 
-	const GUEST_METHODS = new Set(["save_reader", "delete_reader", "get_progress", "start_session", "finish_session", "session_feedback", "save_progress", "get_resume", "practise_words"]);
+	const GUEST_METHODS = new Set(["save_reader", "delete_reader", "get_progress", "start_session", "finish_session", "session_feedback", "save_progress", "get_resume", "practise_words", "save_quiz"]);
 
 	function guestDb() {
 		if (!S.guestDb) {
@@ -142,6 +142,8 @@
 				gap_percent: clamp(parseInt(data.gap_percent, 10) || d.gap_percent, 5, 300),
 				reading_age: parseInt(data.reading_age, 10) ? clamp(parseInt(data.reading_age, 10), 4, 18) : 0,
 				syllable_hint: data.syllable_hint === undefined ? 1 : Number(data.syllable_hint) ? 1 : 0,
+				record_reading: Number(data.record_reading) ? 1 : 0,
+				classes: [],
 				display_prefs: typeof data.display_prefs === "string" ? data.display_prefs.slice(0, 300) : "{}",
 				word_bank: reader.word_bank || {},
 			});
@@ -196,6 +198,11 @@
 				suggest_practice: Boolean(rs && ns && gap > threshold), words_total: words, words_helped: helped.length,
 				reader_wpm: Math.round(row.reader_wpm), narrator_wpm: words && ns ? Math.round((words / ns) * 60) : 0,
 			};
+		}
+		if (method === "save_quiz") {
+			const row = session();
+			if (row) { row.quiz_total = Number(args.total) || 0; row.quiz_correct = Number(args.correct) || 0; guestSave(); }
+			return { ok: true };
 		}
 		if (method === "save_progress") {
 			const row = session();
@@ -377,6 +384,45 @@
 
 	function hush() {
 		if (synth) synth.cancel();
+		if (S.audio) S.audio.cancel();
+	}
+
+	/** Hash of a sentence; must match es_reading/narration.py text_key. */
+	function textKey(text) {
+		const t = text.replace(/\s+/g, " ").trim().toLowerCase();
+		let out = "";
+		for (const seed of [0x811c9dc5, 0x01000193]) {
+			let hash = seed;
+			for (let i = 0; i < t.length; i++) hash = Math.imul(hash ^ t.charCodeAt(i), 0x01000193) >>> 0;
+			out += hash.toString(16).padStart(8, "0");
+		}
+		return out;
+	}
+
+	/** Play one recorded sentence. Resolves with the seconds it took, or null if stopped or it failed. */
+	function playClip(clip, opts, length) {
+		return new Promise((resolve) => {
+			const audio = new Audio(clip.u);
+			const rate = Math.max(0.5, Math.min(1.5, Number(pref("speech_rate")) || 1));
+			let started = 0;
+			let settled = false;
+			const finish = (ok) => {
+				if (settled) return;
+				settled = true;
+				audio.pause();
+				if (S.audio && S.audio.el === audio) S.audio = null;
+				resolve(ok && started ? (performance.now() - started) / 1000 : null);
+			};
+			audio.playbackRate = rate;
+			audio.preservesPitch = true;
+			audio.onplaying = () => { if (!started) { started = performance.now(); if (opts.onstart) opts.onstart(); } };
+			// No word timings come with the recording, so the highlight follows the playback position.
+			audio.ontimeupdate = () => { if (opts.onword && audio.duration) opts.onword(Math.floor((audio.currentTime / audio.duration) * length)); };
+			audio.onended = () => finish(true);
+			audio.onerror = () => finish(false);
+			S.audio = { el: audio, cancel: () => finish(false) };
+			audio.play().catch(() => finish(false));
+		});
 	}
 
 	// ------------------------------------------------------------------ words and matching
@@ -614,6 +660,7 @@
 			["speedy", "⚡", "As quick as the narrator", reads.some((p) => p.reader_seconds > 0 && p.narrator_seconds > 0 && p.gap_percent <= 0)],
 			["tricky", "🧩", "Tricky word practice", progress.some((p) => p.mode === "Tricky Words")],
 			["wizard", "🧙", "Word wizard: 10 words mastered", mastered >= 10],
+			["quiz", "🤔", "Every question right", progress.some((p) => p.quiz_total > 0 && p.quiz_correct === p.quiz_total)],
 		].map(([id, icon, title, earned]) => ({ id, icon, title, earned }));
 		return { books, streak, mastered, reads, badges, minutes: Math.round(reads.reduce((n, p) => n + (p.reader_seconds || 0), 0) / 60) };
 	}
@@ -695,7 +742,12 @@
 			h("div", { class: "bar" }, h("h1", {}, "ES Reading")),
 			h("div", { class: "page" },
 				h("div", { class: "hero" }, h("h2", {}, "Who's reading today?"), S.boot.readers.length ? null : h("p", {}, "Add each child once. A first name or nickname is all that's needed.")),
-				h("div", { class: "readers" }, cards))
+				h("div", { class: "readers" }, cards),
+				S.boot.weekly_email && S.boot.weekly_email.offered && h("p", { class: "empty", style: "padding:28px 0 0" },
+					h("button", { class: "btn small", onclick: () => guard(async () => {
+						S.boot.weekly_email.on = (await api("set_weekly_email", { on: S.boot.weekly_email.on ? 0 : 1 }, true)).on;
+						viewReaders();
+					}) }, S.boot.weekly_email.on ? "✉ Weekly email summary: on" : "✉ Weekly email summary: off")))
 		);
 	}
 
@@ -737,6 +789,12 @@
 		const choose = (options, current) => h("select", {}, options.map(([value, label]) => h("option", { value, selected: value === current }, label)));
 		const level = h("input", { type: "number", min: 4, max: 18, value: draft.reading_age || "", placeholder: "Worked out automatically" });
 		const hint = h("input", { type: "checkbox", checked: reader ? Boolean(draft.syllable_hint) : true });
+		const record = h("input", { type: "checkbox", checked: Boolean(draft.record_reading) });
+		const code = h("input", { type: "text", maxlength: 8, placeholder: "6-letter code from the teacher", style: "text-transform:uppercase" });
+		const classBox = h("div", {});
+		const paintClasses = (list) => classBox.replaceChildren(...(list || []).map((c) => h("p", { class: "meta" }, `In ${c.class_name} `,
+			h("button", { type: "button", class: "btn small", onclick: () => guard(async () => { const r = await api("leave_class", { reader: reader.name, name: c.name }, true); updateReader(r); paintClasses(r.classes); }) }, "Leave"))));
+		paintClasses(draft.classes);
 		const font = choose([["default", "Rounded (standard)"], ["lexend", "Lexend (wider letters)"]], dp.font || "default");
 		const size = choose([["normal", "Normal"], ["large", "Large"], ["xlarge", "Extra large"]], dp.size || "normal");
 		const spacing = choose([["normal", "Normal"], ["wide", "Wide"]], dp.spacing || "normal");
@@ -744,6 +802,7 @@
 		const collect = () => ({
 			reading_age: level.value || 0,
 			syllable_hint: hint.checked ? 1 : 0,
+			record_reading: record.checked ? 1 : 0,
 			display_prefs: JSON.stringify({ font: font.value, size: size.value, spacing: spacing.value, background: background.value }),
 			name: reader && reader.name,
 			reader_name: name.value,
@@ -778,6 +837,16 @@
 			h("label", { class: "field" }, h("span", {}, "Suggest practice when reading takes this much longer than the narrator (%)"), gap),
 			h("label", { class: "field" }, h("span", {}, "Reading level (age)"), level, h("small", {}, "Optional. Books near this level are marked “Just right”. Leave it blank and the app works it out from the books read.")),
 			h("label", { class: "field check" }, hint, h("span", {}, "Show the syllables first when stuck on a word")),
+			h("label", { class: "field check" }, record, h("span", {}, "Record my reading so I can hear it afterwards", h("small", {}, "Recordings stay on this device and are gone when you leave the results page. On some tablets recording stops the app from listening; turn this off if that happens."))),
+			reader && !S.guest && h("div", {}, h("h3", {}, "Class"), classBox,
+				h("label", { class: "field" }, h("span", {}, "Join a class"), code, h("small", {}, "Joining shares this reader's name and reading progress with the class teacher.")),
+				h("button", { type: "button", class: "btn small", onclick: () => guard(async () => {
+					const r = await api("join_class", { reader: reader.name, code: code.value }, true);
+					updateReader(r);
+					paintClasses(r.classes);
+					code.value = "";
+					toast("Joined the class.");
+				}) }, "Join")),
 			h("h3", {}, "How the words look"),
 			h("div", { class: "two" }, h("label", { class: "field" }, h("span", {}, "Lettering"), font), h("label", { class: "field" }, h("span", {}, "Text size"), size)),
 			h("div", { class: "two" }, h("label", { class: "field" }, h("span", {}, "Spacing"), spacing), h("label", { class: "field" }, h("span", {}, "Background"), background))
@@ -810,6 +879,7 @@
 
 	async function viewLibrary() {
 		leaveRun();
+		clearRecordings();
 		const [books, progress] = await Promise.all([api("get_books"), api("get_progress", { reader: S.reader.name })]);
 		S.boot.books = books;
 		S.progress = progress;
@@ -820,6 +890,7 @@
 		const shelves = [...new Set(books.map((b) => (b.shelf || "").trim()).filter(Boolean))].sort((x, y) => x.localeCompare(y));
 		if (!shelves.includes(S.filter.shelf)) S.filter.shelf = "";
 		const fitRank = { right: 0, "": 1, stretch: 2, easy: 3 };
+		const assigned = new Set((S.reader.classes || []).flatMap((c) => c.books));
 
 		const card = (b) => {
 			const ready = b.status === "Ready";
@@ -827,6 +898,7 @@
 			const cover = h("span", { class: "cover", style: b.cover_image ? `background-image:url("${encodeURI(b.cover_image)}")` : "" }, b.cover_image ? "" : "📖");
 			const meta = [b.reading_level, b.word_count ? `${b.word_count} words` : ""].filter(Boolean).join(" · ");
 			const kids = [cover, h("span", { class: "title" }, b.title), meta && h("span", { class: "meta" }, meta),
+				assigned.has(b.name) && h("span", { class: "fit class" }, "From your class"),
 				fit === "right" && h("span", { class: "fit right" }, "Just right for you"),
 				fit === "stretch" && h("span", { class: "fit" }, "A challenge"),
 				readBooks.has(b.name) && h("span", { class: "tick", title: "Read" }, "✓")];
@@ -847,7 +919,7 @@
 			const shown = books
 				.filter((b) => !S.filter.shelf || (b.shelf || "").trim() === S.filter.shelf)
 				.filter((b) => !text || [b.title, b.shelf, b.reading_level, b.summary].some((v) => String(v || "").toLowerCase().includes(text)))
-				.map((b, i) => ({ b, i, rank: fitRank[b.status === "Ready" ? bookFit(b) : ""] }))
+				.map((b, i) => ({ b, i, rank: assigned.has(b.name) && !readBooks.has(b.name) ? -1 : fitRank[b.status === "Ready" ? bookFit(b) : ""] }))
 				.sort((x, y) => x.rank - y.rank || x.i - y.i)
 				.map((x) => card(x.b));
 			grid.replaceChildren(...shown);
@@ -874,6 +946,7 @@
 				h("button", { class: "who btn small", onclick: viewReaders, title: "Change reader" }, h("span", { class: "avatar" }, S.reader.avatar || "🦊"), S.reader.reader_name),
 				h("h1", {}, "Library"),
 				lib && h("button", { class: "btn small sun", onclick: addBook }, "＋ Add a book"),
+				S.boot.is_teacher && h("button", { class: "btn small", onclick: viewClasses }, "🏫 Classes"),
 				h("button", { class: "btn small", onclick: viewWords, title: "My words" }, "🧠 My words" + (learning ? ` (${learning})` : "")),
 				h("button", { class: "btn small", onclick: viewProgress, title: "Progress" }, progressLabel),
 				h("button", { class: "btn small", onclick: () => editReader(S.reader) }, "⚙ Settings")),
@@ -897,6 +970,7 @@
 				await viewLibrary();
 			})),
 			act("🖼 Picture", () => { close(); bookPicture(b); }),
+			ready && S.boot.narration_enabled && act("🎙 Narrator's voice", () => { close(); bookNarration(b); }),
 			act("✏️ Title, shelf and level", () => { close(); bookDetails(b, shelves); }),
 			ready && act("📄 Choose the pages to read", () => { close(); bookPages(b); }),
 			ready && act(b.published ? "🙈 Hide from families" : "👀 Show to families", () => guard(async () => { await api("set_book_published", { book: b.name, published: b.published ? 0 : 1 }, true); close(); await viewLibrary(); })),
@@ -1035,28 +1109,176 @@
 	}
 
 	function addBook() {
-		const title = h("input", { type: "text", maxlength: 140, placeholder: "Leave blank to use the file name" });
-		const file = h("input", { type: "file", accept: "application/pdf,.pdf" });
+		const title = h("input", { type: "text", maxlength: 140, placeholder: "Leave blank to use the file's name" });
+		const file = h("input", { type: "file", accept: "application/pdf,.pdf,application/epub+zip,.epub" });
+		const text = h("textarea", { rows: 9, placeholder: "Type or paste the story here. Leave a blank line between paragraphs." });
+		const kind = h("select", {}, h("option", { value: "file" }, "A PDF or EPUB file"), h("option", { value: "text" }, "Text I type or paste"));
+		const fileField = h("label", { class: "field" }, h("span", {}, "File"), file, h("small", {}, "PDFs keep their pictures and layout. EPUBs are read as text only."));
+		const textField = h("label", { class: "field", hidden: true }, h("span", {}, "Text"), text);
+		kind.onchange = () => { fileField.hidden = kind.value !== "file"; textField.hidden = kind.value !== "text"; };
 		const status = h("p", { class: "meta" });
-		modal("Add a book", h("div", {}, h("label", { class: "field" }, h("span", {}, "PDF file"), file), h("label", { class: "field" }, h("span", {}, "Title"), title), status), (close) => [
+		modal("Add a book", h("div", {}, h("label", { class: "field" }, h("span", {}, "Add from"), kind), fileField, textField, h("label", { class: "field" }, h("span", {}, "Title"), title), status), (close) => [
 			h("button", { class: "btn", onclick: close }, "Cancel"),
 			h("button", { class: "btn primary", onclick: (e) => guard(async () => {
-				if (!file.files[0]) return toast("Choose a PDF first.");
+				if (kind.value === "file" && !file.files[0]) return toast("Choose a file first.");
+				if (kind.value === "text" && !text.value.trim()) return toast("Type or paste some text first.");
+				if (kind.value === "text" && !title.value.trim()) return toast("Give the book a title.");
 				const btn = e.currentTarget;
 				btn.disabled = true;
 				try {
-					status.textContent = "Uploading…";
-					const form = new FormData();
-					form.append("file", file.files[0]);
-					form.append("title", title.value);
-					const book = await api("create_book", form);
-					const saved = await prepareBook(book, (m) => (status.textContent = m));
+					let saved;
+					if (kind.value === "text") {
+						status.textContent = "Saving…";
+						saved = await api("create_text_book", { title: title.value, text: text.value }, true);
+					} else {
+						status.textContent = "Uploading…";
+						const form = new FormData();
+						form.append("file", file.files[0]);
+						form.append("title", title.value);
+						const book = await api("create_book", form);
+						saved = book.pdf ? await prepareBook(book, (m) => (status.textContent = m)) : book;
+					}
 					close();
 					toast(saved.status === "Ready" ? `Added: ${saved.lines} lines, ${saved.words} words.` : saved.note || saved.status, 6000);
 					await viewLibrary();
 				} finally { btn.disabled = false; }
 			}) }, "Add"),
 		]);
+	}
+
+	// ------------------------------------------------------------------ narrator's recorded voice (librarian)
+
+	async function bookNarration(b) {
+		const [info, book] = await Promise.all([guard(() => api("narration_status", { book: b.name })), guard(() => api("get_book", { name: b.name }))]);
+		if (!info || !book) return;
+		const sentences = bookSentences(book.lines);
+		const characters = sentences.reduce((n, t) => n + t.length, 0);
+		const recorded = {};
+		info.recorded.forEach((r) => (recorded[r.voice] = r));
+		const d = S.boot.defaults;
+		const boxes = info.voices.map((v) => {
+			const done = recorded[v.voice];
+			const box = h("input", { type: "checkbox", checked: v.country === d.voice_country && v.gender === d.voice_gender, "data-country": v.country, "data-gender": v.gender });
+			const note = done ? `${done.status}: ${done.clip_count} of ${sentences.length} sentences` + (done.note ? ` (${done.note})` : "") : "not recorded";
+			return h("label", { class: "field check" }, box, h("span", {}, `${v.country} · ${v.gender.toLowerCase()}`, h("small", {}, note)));
+		});
+		const minutes = Math.max(1, Math.round((sentences.length * 3.5) / 60));
+		modal("Narrator's voice", h("div", {},
+			h("p", { class: "meta" }, `This book has ${sentences.length} sentences, about ${characters.toLocaleString()} characters for each voice. Recording takes about ${minutes} ${minutes === 1 ? "minute" : "minutes"} per voice and happens in the background.`),
+			h("p", { class: "meta" }, "Readers hear the recording that matches their accent and voice setting. Sentences without a recording, and single words, are read by the device's own voice."),
+			boxes), (close) => [
+			h("button", { class: "btn", onclick: close }, "Close"),
+			h("button", { class: "btn primary", onclick: () => guard(async () => {
+				const voices = boxes.map((label) => label.querySelector("input")).filter((box) => box.checked).map((box) => [box.dataset.country, box.dataset.gender]);
+				if (!voices.length) return toast("Tick at least one voice.");
+				const queued = await api("record_narration", { book: b.name, voices: JSON.stringify(voices), sentences: JSON.stringify(sentences) }, true);
+				close();
+				toast(`Recording ${queued.queued.length} ${queued.queued.length === 1 ? "voice" : "voices"} in the background. Open this again to see progress.`, 7000);
+			}) }, "🎙 Record"),
+		], true);
+	}
+
+	// ------------------------------------------------------------------ classes
+
+	/** Teacher: list classes and make new ones. */
+	async function viewClasses() {
+		const classes = await guard(() => api("get_classes"));
+		if (!classes) return;
+		const name = h("input", { type: "text", maxlength: 80, placeholder: "New class name, for example Room 4" });
+		const list = classes.length
+			? classes.map((c) => h("button", { class: "btn", onclick: () => { close(); viewClass(c.name); } }, h("span", {}, c.class_name, h("small", {}, `Code ${c.join_code} · ${c.members} ${c.members === 1 ? "reader" : "readers"} · ${c.books.length} assigned`))))
+			: h("p", { class: "meta" }, "No classes yet. Make one, then give its code to families.");
+		const close = modal("My classes", h("div", {}, h("div", { class: "modes" }, list),
+			h("label", { class: "field", style: "margin-top:18px" }, h("span", {}, "Make a class"), name)), (c) => [
+			h("button", { class: "btn", onclick: c }, "Close"),
+			h("button", { class: "btn primary", onclick: () => guard(async () => {
+				const made = await api("save_class", { class_name: name.value }, true);
+				c();
+				viewClass(made.name);
+			}) }, "Create"),
+		]);
+	}
+
+	async function viewClass(className) {
+		const report = await guard(() => api("class_report", { name: className }));
+		if (!report) return;
+		const titles = {};
+		S.boot.books.forEach((b) => (titles[b.name] = b.title));
+		const rows = report.readers.map((r) => h("tr", {},
+			h("td", {}, (r.avatar || "🦊") + " ", h("b", {}, r.reader_name)),
+			h("td", {}, r.books_read),
+			h("td", {}, `${r.minutes_week} min`, h("div", { class: "meta" }, `${r.sessions_week} ${r.sessions_week === 1 ? "session" : "sessions"}`)),
+			h("td", {}, r.words_helped_week),
+			h("td", {}, r.last_read || "–", r.latest_wpm ? h("div", { class: "meta" }, `${r.latest_wpm} words/min`) : null),
+			h("td", {}, report.books.length ? `${r.assigned_done.length} of ${report.books.length}` : "–")));
+		const boxes = S.boot.books.filter((b) => b.status === "Ready").map((b) =>
+			h("label", { class: "field check" }, h("input", { type: "checkbox", checked: report.books.includes(b.name), "data-book": b.name }), h("span", {}, b.title)));
+		const body = h("div", {},
+			h("div", { class: "joincode" }, h("span", {}, "Class code"), h("b", {}, report.join_code), h("small", {}, "Families type this code into a reader's Settings to join.")),
+			h("h3", {}, "Readers"),
+			rows.length
+				? h("table", { class: "progress" }, h("thead", {}, h("tr", {}, ["Reader", "Books read", "This week", "Words helped", "Last read", "Assigned done"].map((t) => h("th", {}, t)))), h("tbody", {}, rows))
+				: h("p", { class: "meta" }, "No readers have joined yet."),
+			h("h3", {}, "Assigned books"),
+			boxes.length ? boxes : h("p", { class: "meta" }, "There are no books in the library yet."));
+		modal(report.class_name, body, (close) => [
+			h("button", { class: "btn danger small", onclick: () => window.confirm(`Delete the class "${report.class_name}"? Readers keep their own progress.`) && guard(async () => { await api("delete_class", { name: report.name }, true); close(); viewClasses(); }) }, "Delete class"),
+			h("button", { class: "btn", onclick: () => { close(); viewClasses(); } }, "Back"),
+			h("button", { class: "btn primary", onclick: () => guard(async () => {
+				const books = boxes.map((label) => label.querySelector("input")).filter((box) => box.checked).map((box) => box.dataset.book);
+				await api("set_class_books", { name: report.name, books: JSON.stringify(books) }, true);
+				close();
+				toast("Assigned books saved.");
+			}) }, "Save books"),
+		], true);
+	}
+
+	// ------------------------------------------------------------------ questions about the story
+
+	function viewQuiz(session) {
+		leaveRun();
+		const questions = S.book.questions.slice(0, 6);
+		let at = 0;
+		let right = 0;
+		const stage = h("div", { class: "result quiz" });
+		const meter = h("i");
+		show(
+			h("div", { class: "bar" }, h("button", { class: "btn icon-btn", "aria-label": "Back to the library", onclick: () => guard(viewLibrary) }, "✕"),
+				h("h1", {}, "Questions about the story"), h("div", { class: "meter" }, meter)),
+			h("div", { class: "page" }, stage)
+		);
+		const done = () => {
+			hush();
+			if (session) api("save_quiz", { session, correct: right, total: questions.length }, true).catch(() => {});
+			if (right === questions.length) cheer("🎉");
+			stage.replaceChildren(
+				h("div", { class: "hero" }, h("div", { class: "stars" }, right === questions.length ? "🤔⭐" : "🤔"),
+					h("h2", {}, `You got ${right} of ${questions.length} right!`),
+					h("p", {}, right === questions.length ? "You understood the whole story." : "Reading the story again will help with the ones you missed.")),
+				practiceOptions(false));
+		};
+		const ask = () => {
+			if (at >= questions.length) return done();
+			const q = questions[at];
+			meter.style.width = Math.round((at / questions.length) * 100) + "%";
+			const read = () => { hush(); speak(`${q.question} ... ${q.options.join(". ... ")}.`); };
+			const next = h("button", { class: "btn primary big", hidden: true, onclick: () => { at++; ask(); } }, at + 1 === questions.length ? "Finish ➜" : "Next ➜");
+			const options = q.options.map((option, i) => h("button", { class: "btn big option", onclick: () => {
+				if (!next.hidden) return;
+				hush();
+				const ok = i === q.answer;
+				if (ok) { right++; cheer("⭐"); }
+				options.forEach((btn, j) => { btn.disabled = true; btn.classList.add(j === q.answer ? "right" : j === i ? "wrong" : "other"); });
+				next.hidden = false;
+			} }, option));
+			stage.replaceChildren(
+				h("p", { class: "meta" }, `Question ${at + 1} of ${questions.length}`),
+				h("h2", { class: "question" }, q.question),
+				h("div", { class: "options modes" }, options),
+				h("div", { class: "controls", style: "justify-content:center;border:0" }, h("button", { class: "btn", onclick: read }, "🔊 Read it to me"), next));
+			read();
+		};
+		ask();
 	}
 
 	function viewProgress() {
@@ -1115,7 +1337,7 @@
 			let end = i;
 			while (end < lines.length && lines[end].page === page && end - i < perTurn) end++;
 			let extra = 0;
-			while (extra < 3 && end < lines.length && lines[end].page === page && !SENTENCE_END.test(lines[end - 1].text)) { end++; extra++; }
+			while (extra < 6 && end < lines.length && lines[end].page === page && !SENTENCE_END.test(lines[end - 1].text)) { end++; extra++; }
 			let rest = end;
 			while (rest < lines.length && lines[rest].page === page) rest++;
 			if (rest - end <= 2) end = rest; // don't leave a one- or two-line turn at the bottom of a page
@@ -1133,7 +1355,54 @@
 		return { page, lines, tokens, expected, words: tokens.filter((t) => t.parts.length).length };
 	}
 
+	/** Every sentence the narrator would read in this book, as spoken. Used to record the narrator's voice. */
+	function bookSentences(lines) {
+		const pages = {};
+		lines.forEach((line) => (pages[line.page] = pages[line.page] || []).push(line));
+		const out = [];
+		Object.keys(pages).forEach((page) => {
+			const chunk = makeChunk(pages[page], Number(page));
+			let text = "";
+			chunk.tokens.forEach((t, idx) => {
+				const piece = spokenForm(t);
+				if (piece) text += piece + " ";
+				if (SENTENCE_END.test(t.text) || idx === chunk.tokens.length - 1) {
+					if (text.trim()) out.push(text.trim());
+					text = "";
+				}
+			});
+		});
+		return out;
+	}
+
+	function clearRecordings() {
+		(S.recordings || []).forEach((r) => URL.revokeObjectURL(r.url));
+		S.recordings = [];
+	}
+
+	function startRecording(run, chunk) {
+		if (!run.stream || !window.MediaRecorder) return;
+		try {
+			const recorder = new MediaRecorder(run.stream);
+			const parts = [];
+			const label = `Page ${chunk.page}, turn ${run.index + 1}`;
+			recorder.ondataavailable = (e) => e.data && e.data.size && parts.push(e.data);
+			recorder.onstop = () => { if (parts.length) S.recordings.push({ label, url: URL.createObjectURL(new Blob(parts, { type: recorder.mimeType })) }); };
+			recorder.start();
+			run.recorder = recorder;
+		} catch (e) { run.recorder = null; }
+	}
+
+	function stopRecording(run) {
+		if (run.recorder && run.recorder.state !== "inactive") run.recorder.stop();
+		run.recorder = null;
+	}
+
 	function leaveRun() {
+		if (S.run) {
+			stopRecording(S.run);
+			if (S.run.stream) S.run.stream.getTracks().forEach((track) => track.stop());
+		}
 		document.body.classList.remove("in-session");
 		if (S.run) {
 			S.run.dead = true;
@@ -1178,8 +1447,16 @@
 				}
 			}
 		}
+		clearRecordings();
 		renderReadView(run);
 		try {
+			if (pref("record_reading") && mode !== "Listen" && navigator.mediaDevices && window.MediaRecorder) {
+				try { run.stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { run.stream = null; }
+				if (run.dead) { if (run.stream) run.stream.getTracks().forEach((track) => track.stop()); return; }
+			}
+			if (S.boot.narration_enabled && mode !== "Re-read") {
+				run.narration = await api("get_narration", { book: S.book.name, country: pref("voice_country"), gender: pref("voice_gender") }).catch(() => null);
+			}
 			if (!run.session) run.session = (await api("start_session", { reader: S.reader.name, book: S.book.name, mode }, true)).name;
 			try { S.pdf = S.book.pdf ? await openPdf(S.book.pdf) : null; } catch (e) { S.pdf = null; }
 			for (run.index = startAt; run.index < run.chunks.length && !run.dead; run.index++) {
@@ -1280,7 +1557,17 @@
 	async function renderPage(run, chunk) {
 		const ui = run.ui;
 		if (!S.pdf) {
-			ui.pagewrap.replaceChildren(h("div", { class: "nopdf" }, "📖"));
+			// A book made from text or an EPUB has no page image: show its lines instead.
+			const inChunk = new Set(chunk.lines);
+			const rows = S.book.lines.filter((line) => line.page === chunk.page).map((line) => {
+				const el = h("div", { class: "tline" + (inChunk.has(line) ? " hl-line" : "") }, line.text);
+				line.hl = inChunk.has(line) ? el : null;
+				return el;
+			});
+			ui.pagewrap.style.width = "";
+			ui.pagewrap.replaceChildren(h("div", { class: "textpage" }, rows));
+			const first = chunk.lines.find((line) => line.hl);
+			if (first) ui.sheet.scrollTo({ top: Math.max(0, first.hl.offsetTop - 40), behavior: "smooth" });
 			return;
 		}
 		if (ui.shownPage !== chunk.page) {
@@ -1378,10 +1665,14 @@
 				for (const [at, idx] of starts) { if (at <= charIndex) hit = idx; else break; }
 				markToken(chunk, hit, "now");
 			};
-			const seconds = await speak(text, {
+			const voiceOpts = {
 				onstart: () => { for (let i = a; i < b; i++) chunk.tokens[i].el.classList.add("speaking"); markLine(chunk, chunk.tokens[a].line); },
 				onword: light,
-			});
+			};
+			// Use the recorded narrator when this sentence has a clip; otherwise the device's own voice.
+			const clip = run.narration && run.narration.clips && run.narration.clips[textKey(text)];
+			let seconds = clip ? await playClip(clip, voiceOpts, text.length) : null;
+			if (seconds === null && !(run.dead || run.paused || replay)) seconds = await speak(text, voiceOpts);
 			for (let i = a; i < b; i++) chunk.tokens[i].el.classList.remove("speaking", "now");
 			if (run.dead) break;
 			if (run.paused || replay) continue; // interrupted: say this sentence again
@@ -1464,6 +1755,7 @@
 			turn.finish = () => {
 				if (turn.over) return;
 				turn.over = true;
+				stopRecording(run);
 				if (run.listener) run.listener.stop();
 				if (!run.paused) run.readerMs += performance.now() - turn.started;
 				chunk.tokens.forEach((t) => { t.el.classList.remove("cur"); t.el.classList.add("done"); });
@@ -1472,6 +1764,7 @@
 				resolve();
 			};
 			run.endTurn = turn.finish;
+			startRecording(run, chunk);
 			run.helpNow = () => helpWord(run, chunk, chunk.expected[turn.pointer].tok);
 			if (!chunk.expected.length) return turn.finish();
 			setPointer(run, 0);
@@ -1590,6 +1883,10 @@
 		const stars = run.mode === "Listen" ? 0 : share <= 0.02 ? 3 : share <= 0.08 ? 2 : 1;
 		const feedback = h("div", { class: "feedback" }, "…");
 		const newBadges = h("div", { class: "badges new", hidden: true });
+		const canQuiz = run.mode !== "Listen" && (S.book.questions || []).length > 0;
+		const recordings = (S.recordings || []).length
+			? h("div", { class: "recordings" }, h("h3", {}, "🎧 Hear yourself read"), S.recordings.map((r) => h("div", { class: "recording" }, h("span", {}, r.label), h("audio", { controls: true, src: r.url, preload: "metadata" }))))
+			: null;
 		const longest = Math.max(r.reader_seconds, r.narrator_seconds, 1);
 		const timed = run.mode !== "Listen" && r.reader_seconds > 0;
 		const gapLine = !timed ? "" : r.gap_percent > 0
@@ -1610,6 +1907,8 @@
 					h("div", { class: "barrow" }, h("span", {}, "Narrator"), h("i", { style: `width:${(r.narrator_seconds / longest) * 80}%` }))),
 				timed && h("p", {}, r.words_helped ? `Words I helped with: ${run.helped.join(", ")}` : "You didn't need help with any words."),
 				newBadges,
+				canQuiz && h("div", { class: "options modes" }, h("button", { class: "btn sun big", onclick: () => viewQuiz(r.name) }, h("span", { style: "font-size:28px" }, "❓"), h("span", {}, "Answer questions about the story", h("small", {}, `${Math.min(S.book.questions.length, 6)} quick questions`)))),
+				recordings,
 				feedback,
 				r.suggest_practice && h("h3", {}, "What would you like to do next?"),
 				practiceOptions(r.suggest_practice)))
@@ -1742,7 +2041,7 @@
 	// ------------------------------------------------------------------ go
 
 	window.addEventListener("pagehide", hush);
-	window.ESReading = { tokenize, advance, similar, buildChunks, extractPdf, syllables }; // exposed for testing
+	window.ESReading = { tokenize, advance, similar, buildChunks, extractPdf, syllables, textKey, bookSentences }; // exposed for testing
 	start().catch((e) => {
 		console.error(e);
 		show(h("div", { class: "page" }, h("div", { class: "hero" }, h("h2", {}, "ES Reading couldn't start"), h("p", {}, e.message || String(e)))));

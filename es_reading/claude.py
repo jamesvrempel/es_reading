@@ -100,8 +100,13 @@ You are given the numbered lines of one document. Reply with one JSON object and
                  name/date/score blanks, answer keys and notes addressed to teachers or parents],
   "tricky_words": [{"word": "as it appears in the text, lower case unless a proper noun",
                     "say": "syllables separated by hyphens, e.g. eu-ca-lyp-tus",
-                    "meaning": "what it means in this text, in at most 12 very simple words"}]
+                    "meaning": "what it means in this text, in at most 12 very simple words"}],
+  "questions": [{"question": "a short question about what happens in the text",
+                 "options": ["three short answers", "only one of them right", "all plausible"],
+                 "answer": 0}]
 }
+Write four questions a child could answer after reading the readable lines once: three about what
+happened and one about why. "answer" is the position (0, 1 or 2) of the right option; vary it.
 Choose up to 20 tricky words: the ones a child at this level is most likely to stumble on (long,
 irregularly spelt, or unfamiliar). Keep story text, questions and instructions for the child as readable."""
 
@@ -120,7 +125,7 @@ def prepare_book(book):
 	# record as it is afterwards, not to a stale snapshot (which fails if the book changed meanwhile).
 	frappe.db.commit()
 	try:
-		result = parse_json(call(PREPARE_SYSTEM, f"Title: {title}\n\n{numbered}", max_tokens=4000, timeout=180))
+		result = parse_json(call(PREPARE_SYSTEM, f"Title: {title}\n\n{numbered}", max_tokens=6000, timeout=180))
 	except ClaudeError as e:
 		frappe.log_error(title="ES Reading: book preparation failed", message=str(e))
 		frappe.db.set_value("Reading Book", book, "note", str(e)[:500])
@@ -149,6 +154,14 @@ def prepare_book(book):
 			"tricky_words",
 			{"word": word, "say": (item.get("say") or "").strip()[:80], "meaning": (item.get("meaning") or "").strip()[:200]},
 		)
+	questions = []
+	for item in (result.get("questions") or [])[:6]:
+		options = [str(o).strip()[:140] for o in (item.get("options") or [])][:3]
+		answer = cint(item.get("answer"))
+		if (item.get("question") or "").strip() and len(options) == 3 and all(options) and 0 <= answer <= 2:
+			questions.append({"question": item["question"].strip()[:300], "option_a": options[0], "option_b": options[1], "option_c": options[2], "correct": "ABC"[answer]})
+	if questions:
+		doc.set("questions", questions)
 	doc.reading_level = (result.get("reading_level") or doc.reading_level or "")[:60]
 	doc.summary = (result.get("summary") or doc.summary or "")[:300]
 	doc.ai_prepared = 1

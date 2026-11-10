@@ -15,6 +15,7 @@
   "reading_level",
   "shelf",
   "skip_pages",
+  "source_type",
   "summary",
   "stats_section",
   "page_count",
@@ -26,7 +27,9 @@
   "lines_section",
   "lines",
   "words_section",
-  "tricky_words"
+  "tricky_words",
+  "questions_section",
+  "questions"
  ],
  "fields": [
   {
@@ -94,6 +97,14 @@
    "label": "Pages not read"
   },
   {
+   "default": "PDF",
+   "fieldname": "source_type",
+   "fieldtype": "Select",
+   "label": "Source",
+   "options": "PDF\nText\nEPUB",
+   "read_only": 1
+  },
+  {
    "fieldname": "summary",
    "fieldtype": "Small Text",
    "label": "Summary"
@@ -158,11 +169,22 @@
    "fieldtype": "Table",
    "label": "Tricky words",
    "options": "Reading Book Word"
+  },
+  {
+   "fieldname": "questions_section",
+   "fieldtype": "Section Break",
+   "label": "Questions about the story"
+  },
+  {
+   "fieldname": "questions",
+   "fieldtype": "Table",
+   "label": "Questions",
+   "options": "Reading Book Question"
   }
  ],
  "image_field": "cover_image",
  "links": [],
- "modified": "2026-11-10 23:00:00.000000",
+ "modified": "2026-11-10 23:30:00.000000",
  "modified_by": "Administrator",
  "module": "ES Reading",
  "name": "Reading Book",

@@ -65,6 +65,7 @@ To make `/reading` the site's front page, set **Website Settings → Home Page**
 | --- | --- | --- |
 | Family | Any signed-in user (for example an approved ES Signup account). No role needed. | Add their own readers, read books, see their own children's progress. |
 | Guest | Only when **Sign-up not required** is ticked in ES Reading Settings | Read the published books. Readers and progress are kept in that browser only, never on the server; feedback is the standard text rather than Claude's. |
+| Teacher | Role **Reading Teacher** | Make classes at `/reading`, assign books and see the progress of readers who joined. |
 | Librarian | Role **Reading Librarian** (or System Manager) | Add, prepare, hide and delete books at `/reading`; edit book lines and tricky words in the Desk. |
 | Administrator | System Manager | Settings, plus all readers and sessions in the Desk. |
 
@@ -127,6 +128,39 @@ and up to 20 tricky words with syllables and child-friendly meanings.
 - **Shelves** group books in the library; with shelves set (or more than six books) a search box and shelf
   buttons appear.
 - **Pages to read** leaves out whole pages, such as questions or an answer key. It survives a re-scan.
+
+## Recorded narrator voice (optional)
+
+By default the narrator is each device's own voice. With an Azure Speech key the narrator can be recorded
+once per book in a natural voice that every device then plays.
+
+1. In the Azure portal create a **Speech** resource. The **Free (F0)** pricing tier covers half a million
+   characters a month; a typical short book is a few thousand characters per voice.
+2. In **ES Reading Settings** set Narrator to **Azure Speech** and enter the key and the resource's region
+   (for example `australiaeast`).
+3. At `/reading`, a librarian opens **Manage → Narrator's voice** on a book, ticks the voices to record
+   (accent and male or female) and presses **Record**. It runs in the background, slowly on purpose so the
+   free tier's request limit is not hit.
+
+Readers hear the recording that matches their accent and voice setting. Sentences that have no recording,
+and single words said as help, are read by the device's voice. Only the book's text is sent to Azure.
+
+## Questions, recordings, classes and email
+
+- **Questions about the story**: Claude writes four multiple-choice questions when it prepares a book, and
+  they can be edited on the Reading Book in the Desk. After reading, the results page offers them.
+- **Hear yourself read** (per reader, off by default): each turn is recorded in the browser and can be
+  played back on the results page. Recordings are never uploaded and are discarded on leaving that page.
+- **Classes**: give a teacher the **Reading Teacher** role. At `/reading` they make a class, share its
+  six-letter code and assign books. A family joins by typing the code into a reader's Settings, which shares
+  that reader's name and reading progress with the teacher; they can leave at any time.
+- **Weekly email**: tick **Email families a weekly reading summary** in ES Reading Settings. Each family
+  that read during the week gets one email, and can turn it off on the "Who's reading" page.
+
+## Other formats
+
+**Add a book** accepts PDF and EPUB files, or text typed or pasted in. EPUB and typed books are read as
+text: their pictures are not shown and there is no page image, so the page side shows the text instead.
 
 ## Voices
 

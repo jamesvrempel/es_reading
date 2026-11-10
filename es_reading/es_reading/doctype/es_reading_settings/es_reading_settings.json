@@ -1,0 +1,145 @@
+{
+ "actions": [],
+ "creation": "2026-11-10 16:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "ai_section",
+  "enable_ai",
+  "anthropic_api_key",
+  "claude_model",
+  "defaults_section",
+  "lines_per_turn",
+  "silence_seconds",
+  "gap_percent",
+  "column_break_1",
+  "voice_country",
+  "voice_gender",
+  "speech_rate",
+  "limits_section",
+  "tricky_word_length",
+  "max_readers",
+  "max_pdf_mb"
+ ],
+ "fields": [
+  {
+   "fieldname": "ai_section",
+   "fieldtype": "Section Break",
+   "label": "Claude"
+  },
+  {
+   "default": "1",
+   "fieldname": "enable_ai",
+   "fieldtype": "Check",
+   "label": "Use Claude to prepare books and write feedback"
+  },
+  {
+   "description": "Create one at console.anthropic.com. Stored encrypted; never sent to the browser.",
+   "fieldname": "anthropic_api_key",
+   "fieldtype": "Password",
+   "label": "Claude API key"
+  },
+  {
+   "default": "claude-sonnet-5-5",
+   "description": "Model ID used for book preparation and feedback.",
+   "fieldname": "claude_model",
+   "fieldtype": "Data",
+   "label": "Claude model"
+  },
+  {
+   "fieldname": "defaults_section",
+   "fieldtype": "Section Break",
+   "label": "Defaults for new readers"
+  },
+  {
+   "default": "10",
+   "fieldname": "lines_per_turn",
+   "fieldtype": "Int",
+   "label": "Lines per turn"
+  },
+  {
+   "default": "4",
+   "fieldname": "silence_seconds",
+   "fieldtype": "Int",
+   "label": "Help after silence (seconds)"
+  },
+  {
+   "default": "20",
+   "fieldname": "gap_percent",
+   "fieldtype": "Int",
+   "label": "Reading time gap that triggers practice options (%)"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Australia",
+   "fieldname": "voice_country",
+   "fieldtype": "Select",
+   "label": "Voice country / accent",
+   "options": "Australia\nUnited Kingdom\nUnited States\nNew Zealand\nIreland\nCanada\nSouth Africa\nIndia"
+  },
+  {
+   "default": "Female",
+   "fieldname": "voice_gender",
+   "fieldtype": "Select",
+   "label": "Voice",
+   "options": "Female\nMale"
+  },
+  {
+   "default": "0.9",
+   "description": "1.0 is normal speed. 0.8 to 0.95 suits early readers.",
+   "fieldname": "speech_rate",
+   "fieldtype": "Float",
+   "label": "Narrator speed"
+  },
+  {
+   "fieldname": "limits_section",
+   "fieldtype": "Section Break",
+   "label": "Limits"
+  },
+  {
+   "default": "8",
+   "fieldname": "tricky_word_length",
+   "fieldtype": "Int",
+   "label": "Count a word as long from (letters)"
+  },
+  {
+   "default": "6",
+   "fieldname": "max_readers",
+   "fieldtype": "Int",
+   "label": "Maximum readers per family"
+  },
+  {
+   "default": "30",
+   "fieldname": "max_pdf_mb",
+   "fieldtype": "Int",
+   "label": "Maximum PDF size (MB)"
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-11-10 16:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ES Reading",
+ "name": "ES Reading Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 0,
+   "print": 1,
+   "read": 1,
+   "report": 0,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

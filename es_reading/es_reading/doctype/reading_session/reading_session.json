@@ -1,0 +1,180 @@
+{
+ "actions": [],
+ "autoname": "format:RS-{YYYY}-{#####}",
+ "creation": "2026-11-10 16:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "reader",
+  "family_user",
+  "book",
+  "mode",
+  "status",
+  "column_break_1",
+  "started_on",
+  "completed_on",
+  "listening_used",
+  "timing_section",
+  "reader_seconds",
+  "narrator_seconds",
+  "gap_percent",
+  "column_break_2",
+  "words_total",
+  "reader_wpm",
+  "narrator_wpm",
+  "help_section",
+  "words_helped",
+  "helped_words",
+  "feedback"
+ ],
+ "fields": [
+  {
+   "fieldname": "reader",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Reader",
+   "options": "Reader Profile",
+   "reqd": 1
+  },
+  {
+   "fieldname": "family_user",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Family account",
+   "options": "User"
+  },
+  {
+   "fieldname": "book",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Book",
+   "options": "Reading Book",
+   "reqd": 1
+  },
+  {
+   "fieldname": "mode",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Mode",
+   "options": "Read Together\nRe-read\nTricky Words\nListen"
+  },
+  {
+   "default": "In Progress",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "In Progress\nCompleted"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "started_on",
+   "fieldtype": "Datetime",
+   "label": "Started"
+  },
+  {
+   "fieldname": "completed_on",
+   "fieldtype": "Datetime",
+   "label": "Completed"
+  },
+  {
+   "fieldname": "listening_used",
+   "fieldtype": "Check",
+   "label": "Speech recognition was used"
+  },
+  {
+   "fieldname": "timing_section",
+   "fieldtype": "Section Break",
+   "label": "Timing"
+  },
+  {
+   "fieldname": "reader_seconds",
+   "fieldtype": "Float",
+   "label": "Reader's time (seconds)",
+   "precision": "1"
+  },
+  {
+   "fieldname": "narrator_seconds",
+   "fieldtype": "Float",
+   "label": "Narrator's time (seconds)",
+   "precision": "1"
+  },
+  {
+   "fieldname": "gap_percent",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Gap (%)",
+   "precision": "1"
+  },
+  {
+   "fieldname": "column_break_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "words_total",
+   "fieldtype": "Int",
+   "label": "Words read"
+  },
+  {
+   "fieldname": "reader_wpm",
+   "fieldtype": "Float",
+   "label": "Reader words per minute",
+   "precision": "0"
+  },
+  {
+   "fieldname": "narrator_wpm",
+   "fieldtype": "Float",
+   "label": "Narrator words per minute",
+   "precision": "0"
+  },
+  {
+   "fieldname": "help_section",
+   "fieldtype": "Section Break",
+   "label": "Help given"
+  },
+  {
+   "fieldname": "words_helped",
+   "fieldtype": "Int",
+   "label": "Words helped"
+  },
+  {
+   "fieldname": "helped_words",
+   "fieldtype": "Small Text",
+   "label": "Helped words"
+  },
+  {
+   "fieldname": "feedback",
+   "fieldtype": "Small Text",
+   "label": "Feedback"
+  }
+ ],
+ "links": [],
+ "modified": "2026-11-10 16:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ES Reading",
+ "name": "Reading Session",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

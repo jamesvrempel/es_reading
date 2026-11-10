@@ -1,0 +1,116 @@
+{
+ "actions": [],
+ "autoname": "format:READER-{#####}",
+ "creation": "2026-11-10 16:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "reader_name",
+  "family_user",
+  "avatar",
+  "column_break_1",
+  "voice_country",
+  "voice_gender",
+  "voice_name",
+  "speech_rate",
+  "turns_section",
+  "lines_per_turn",
+  "silence_seconds",
+  "gap_percent"
+ ],
+ "fields": [
+  {
+   "fieldname": "reader_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Reader's first name or nickname",
+   "reqd": 1
+  },
+  {
+   "fieldname": "family_user",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Family account",
+   "options": "User",
+   "reqd": 1
+  },
+  {
+   "fieldname": "avatar",
+   "fieldtype": "Data",
+   "label": "Avatar"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "voice_country",
+   "fieldtype": "Select",
+   "label": "Voice country / accent",
+   "options": "\nAustralia\nUnited Kingdom\nUnited States\nNew Zealand\nIreland\nCanada\nSouth Africa\nIndia"
+  },
+  {
+   "fieldname": "voice_gender",
+   "fieldtype": "Select",
+   "label": "Voice",
+   "options": "\nFemale\nMale"
+  },
+  {
+   "fieldname": "voice_name",
+   "fieldtype": "Data",
+   "label": "Preferred device voice"
+  },
+  {
+   "fieldname": "speech_rate",
+   "fieldtype": "Float",
+   "label": "Narrator speed"
+  },
+  {
+   "fieldname": "turns_section",
+   "fieldtype": "Section Break",
+   "label": "Reading turns"
+  },
+  {
+   "fieldname": "lines_per_turn",
+   "fieldtype": "Int",
+   "label": "Lines per turn"
+  },
+  {
+   "fieldname": "silence_seconds",
+   "fieldtype": "Int",
+   "label": "Help after silence (seconds)"
+  },
+  {
+   "fieldname": "gap_percent",
+   "fieldtype": "Int",
+   "label": "Reading time gap that triggers practice options (%)"
+  }
+ ],
+ "links": [],
+ "modified": "2026-11-10 16:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ES Reading",
+ "name": "Reader Profile",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "show_title_field_in_link": 1,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "reader_name"
+}

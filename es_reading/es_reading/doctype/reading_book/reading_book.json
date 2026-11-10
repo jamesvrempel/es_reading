@@ -1,0 +1,180 @@
+{
+ "actions": [],
+ "autoname": "format:BOOK-{#####}",
+ "creation": "2026-11-10 16:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "title",
+  "pdf",
+  "status",
+  "published",
+  "column_break_1",
+  "cover_image",
+  "reading_level",
+  "summary",
+  "stats_section",
+  "page_count",
+  "line_count",
+  "word_count",
+  "column_break_2",
+  "ai_prepared",
+  "note",
+  "lines_section",
+  "lines",
+  "words_section",
+  "tricky_words"
+ ],
+ "fields": [
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Title",
+   "reqd": 1
+  },
+  {
+   "fieldname": "pdf",
+   "fieldtype": "Attach",
+   "label": "PDF"
+  },
+  {
+   "default": "Uploaded",
+   "description": "Books appear in the family library once Ready. Open /reading as a librarian to prepare an uploaded PDF.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Uploaded\nPreparing\nReady\nNeeds Text\nError"
+  },
+  {
+   "default": "1",
+   "fieldname": "published",
+   "fieldtype": "Check",
+   "label": "Show in the library"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "cover_image",
+   "fieldtype": "Attach Image",
+   "label": "Cover"
+  },
+  {
+   "fieldname": "reading_level",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Reading level"
+  },
+  {
+   "fieldname": "summary",
+   "fieldtype": "Small Text",
+   "label": "Summary"
+  },
+  {
+   "fieldname": "stats_section",
+   "fieldtype": "Section Break",
+   "label": "Contents"
+  },
+  {
+   "fieldname": "page_count",
+   "fieldtype": "Int",
+   "label": "Pages",
+   "read_only": 1
+  },
+  {
+   "fieldname": "line_count",
+   "fieldtype": "Int",
+   "label": "Lines to read",
+   "read_only": 1
+  },
+  {
+   "fieldname": "word_count",
+   "fieldtype": "Int",
+   "label": "Words to read",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "ai_prepared",
+   "fieldtype": "Check",
+   "label": "Prepared by Claude",
+   "read_only": 1
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Preparation note",
+   "read_only": 1
+  },
+  {
+   "fieldname": "lines_section",
+   "fieldtype": "Section Break",
+   "label": "Lines"
+  },
+  {
+   "fieldname": "lines",
+   "fieldtype": "Table",
+   "label": "Lines",
+   "options": "Reading Book Line"
+  },
+  {
+   "fieldname": "words_section",
+   "fieldtype": "Section Break",
+   "label": "Tricky words"
+  },
+  {
+   "fieldname": "tricky_words",
+   "fieldtype": "Table",
+   "label": "Tricky words",
+   "options": "Reading Book Word"
+  }
+ ],
+ "image_field": "cover_image",
+ "links": [],
+ "modified": "2026-11-10 16:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ES Reading",
+ "name": "Reading Book",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Reading Librarian",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "show_title_field_in_link": 1,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "title",
+ "track_changes": 1
+}

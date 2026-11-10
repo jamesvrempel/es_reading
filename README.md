@@ -1,0 +1,116 @@
+# ES Reading
+
+A read-along app for young readers (ages 6+), built on the Frappe Framework.
+
+A grown-up signs in at `/reading`, adds each child as a reader, and picks a PDF from the library.
+The narrator reads a few lines aloud, the child reads the same lines back, and the app helps with a
+word when the child pauses. At the end it compares the child's reading time with the narrator's and
+suggests what to do next.
+
+## Install
+
+On the bench that hosts the site (run as the bench user):
+
+```bash
+cd ~/frappe-bench
+bench get-app https://github.com/jamesvrempel/es_reading --branch main
+bench --site reading.enterprisesystems.com.au install-app es_reading
+bench restart
+```
+
+`bench get-app` clones the repository into `apps/es_reading`, installs it into the bench's Python
+environment, adds it to `sites/apps.txt` and builds its assets. There is nothing to compile: the app
+has no Node dependencies, and PDF.js is bundled.
+
+## Update
+
+```bash
+cd ~/frappe-bench
+git -C apps/es_reading pull
+bench --site reading.enterprisesystems.com.au migrate
+bench build --app es_reading
+bench restart
+```
+
+`bench update --apps es_reading` does the same, but migrates every site on the bench.
+
+## Uninstall
+
+```bash
+bench --site reading.enterprisesystems.com.au uninstall-app es_reading
+bench remove-app es_reading
+```
+
+Uninstalling deletes the books, readers and sessions on that site.
+
+Then open **ES Reading Settings** in the Desk:
+
+1. Paste a Claude API key and press **Test Claude connection**.
+2. Check the defaults for new readers (lines per turn, silence before help, time gap, voice).
+
+To make `/reading` the site's front page, set **Website Settings → Home Page** to `reading`.
+
+## Who can do what
+
+| Who | How they get access | What they can do |
+| --- | --- | --- |
+| Family | Any signed-in user (for example an approved ES Signup account). No role needed. | Add their own readers, read books, see their own children's progress. |
+| Librarian | Role **Reading Librarian** (or System Manager) | Add, prepare, hide and delete books at `/reading`; edit book lines and tricky words in the Desk. |
+| Administrator | System Manager | Settings, plus all readers and sessions in the Desk. |
+
+A family can only ever see its own readers and sessions. Children have no accounts of their own, and
+only a first name or nickname is stored. No audio is recorded or stored.
+
+## Adding books
+
+At `/reading`, a librarian presses **Add a book** and chooses a PDF. The browser finds each line of
+text and where it sits on the page, then the server asks Claude for the reading level, a one-line
+summary, the lines that should not be read aloud (page numbers, name and score blanks, answer keys)
+and up to 20 tricky words with syllables and child-friendly meanings.
+
+- A scanned PDF with no text layer is transcribed by Claude instead (needs the API key).
+- To change what is read, open the **Reading Book** in the Desk and tick **Don't read** on any line,
+  or edit the tricky words. **Re-scan** at `/reading` starts the preparation again from the PDF.
+- PDFs are stored as public files under `/files`.
+
+## How a session works
+
+| Setting | Default | Where |
+| --- | --- | --- |
+| Lines per turn | 10 | Reader settings (⚙) |
+| Help after a pause of | 4 seconds | Reader settings |
+| Suggest practice when the child takes longer than the narrator by | 20% | Reader settings |
+| Accent, male or female voice, exact device voice, speed | Australia, female, 0.9 | Reader settings |
+
+- Turns never run across a page, and a turn is stretched by up to three lines so it ends on a full sentence.
+- **Listening** uses the browser's speech recognition (Chrome, Edge, Safari). The child's reading is
+  followed word by word. If the pointer has not moved for the pause length, the narrator says the
+  word; a second pause on the same word moves past it. Tapping any word also says it.
+- Where the browser cannot listen (Firefox, or the microphone is blocked) the child reads, taps words
+  for help, and taps **I've read it**.
+- **Timing**: the child's time is the time spent in their own turns. The narrator's time is measured
+  while it reads aloud; in "I'll read it myself" mode it is estimated from the narrator's measured pace.
+- When the gap is above the threshold the results page leads with three options: read it again,
+  practise the tricky words, or listen to the whole story.
+
+## Voices
+
+Voices come from the device, not from the server. Each device offers a different set, and browsers do
+not say whether a voice is male or female, so the app recognises the common voice names. If a device
+has no voice for the chosen accent and gender, the library page says which voice it is using instead,
+and reader settings let you pick any exact voice on that device.
+
+## Data model
+
+- **ES Reading Settings** (single): Claude key and model, defaults, limits.
+- **Reading Book**: PDF, cover, status, lines (text, page, position, don't-read flag), tricky words.
+- **Reader Profile**: name, avatar, family account, voice and turn preferences.
+- **Reading Session**: reader, book, mode, times, gap, words helped, feedback.
+
+Because these are ordinary DocTypes, they are also visible to Claude through Frappe Assistant Core
+(for example "how has READER-00001 progressed this month?").
+
+## Licence
+
+MIT, see `LICENSE`. PDF.js 3.11.174 (Apache-2.0) is bundled under `es_reading/public/vendor/pdfjs`
+with its own licence file.

@@ -48,6 +48,10 @@ Then open **ES Reading Settings** in the Desk:
 1. Paste a Claude API key and press **Test Claude connection**.
 2. Check the defaults for new readers (lines per turn, silence before help, time gap, voice).
 
+The Desk has an **ES Reading** workspace (visible to System Managers and Reading Librarians) with
+shortcuts to the app, books, readers and sessions, four number cards, a weekly sessions chart and
+links to the settings.
+
 To make `/reading` the site's front page, set **Website Settings → Home Page** to `reading`.
 
 ## Who can do what

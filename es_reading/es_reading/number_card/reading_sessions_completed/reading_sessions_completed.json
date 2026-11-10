@@ -1,0 +1,22 @@
+{
+ "color": "#2f9e5b",
+ "creation": "2026-11-10 17:00:00.000000",
+ "docstatus": 0,
+ "doctype": "Number Card",
+ "document_type": "Reading Session",
+ "dynamic_filters_json": "[]",
+ "filters_json": "[[\"Reading Session\", \"status\", \"=\", \"Completed\", false]]",
+ "function": "Count",
+ "idx": 0,
+ "is_public": 1,
+ "is_standard": 1,
+ "label": "Sessions completed",
+ "modified": "2026-11-10 17:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ES Reading",
+ "name": "Reading Sessions Completed",
+ "owner": "Administrator",
+ "show_percentage_stats": 1,
+ "stats_time_interval": "Monthly",
+ "type": "Document Type"
+}

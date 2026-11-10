@@ -21,7 +21,7 @@
    "hidden": 0,
    "is_query_report": 0,
    "label": "Library",
-   "link_count": 1,
+   "link_count": 2,
    "onboard": 0,
    "type": "Card Break"
   },
@@ -38,8 +38,18 @@
   {
    "hidden": 0,
    "is_query_report": 0,
+   "label": "Narrator recordings",
+   "link_count": 0,
+   "link_to": "Reading Narration",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
    "label": "Families",
-   "link_count": 3,
+   "link_count": 4,
    "onboard": 0,
    "type": "Card Break"
   },
@@ -59,6 +69,16 @@
    "label": "Reading sessions",
    "link_count": 0,
    "link_to": "Reading Session",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Classes",
+   "link_count": 0,
+   "link_to": "Reading Class",
    "link_type": "DocType",
    "onboard": 0,
    "type": "Link"
@@ -102,7 +122,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-11-10 17:00:00.000000",
+ "modified": "2026-11-10 23:45:00.000000",
  "modified_by": "Administrator",
  "module": "ES Reading",
  "name": "ES Reading",

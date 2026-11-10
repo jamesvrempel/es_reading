@@ -20,6 +20,7 @@
   "help_section",
   "reading_age",
   "syllable_hint",
+  "record_reading",
   "display_prefs",
   "words_section",
   "word_bank"
@@ -110,6 +111,13 @@
    "label": "Show the syllables before saying a word"
   },
   {
+   "default": "0",
+   "description": "Recordings stay in the browser for that session and are never uploaded.",
+   "fieldname": "record_reading",
+   "fieldtype": "Check",
+   "label": "Record reading aloud for playback on the device"
+  },
+  {
    "description": "Font, text size, spacing and background chosen in the app.",
    "fieldname": "display_prefs",
    "fieldtype": "Small Text",
@@ -130,7 +138,7 @@
   }
  ],
  "links": [],
- "modified": "2026-11-10 23:00:00.000000",
+ "modified": "2026-11-10 23:30:00.000000",
  "modified_by": "Administrator",
  "module": "ES Reading",
  "name": "Reader Profile",

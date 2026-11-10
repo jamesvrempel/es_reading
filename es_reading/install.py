@@ -15,11 +15,21 @@ DEFAULTS = {
 }
 
 
+ROLES = {
+	"Reading Librarian": 1,  # manages books; may use the Desk
+	"Reading Teacher": 0,  # manages classes at /reading only
+}
+
+
+def ensure_roles():
+	"""Create the app's roles. Runs on install and after every migrate, so upgrades get new roles too."""
+	for role, desk_access in ROLES.items():
+		if not frappe.db.exists("Role", role):
+			frappe.get_doc({"doctype": "Role", "role_name": role, "desk_access": desk_access}).insert(ignore_permissions=True)
+
+
 def after_install():
-	if not frappe.db.exists("Role", "Reading Librarian"):
-		frappe.get_doc({"doctype": "Role", "role_name": "Reading Librarian", "desk_access": 1}).insert(
-			ignore_permissions=True
-		)
+	ensure_roles()
 	settings = frappe.get_single("ES Reading Settings")
 	for key, value in DEFAULTS.items():
 		if not settings.get(key):

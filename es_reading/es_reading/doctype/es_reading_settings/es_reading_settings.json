@@ -10,6 +10,12 @@
   "enable_ai",
   "anthropic_api_key",
   "claude_model",
+  "narrator_section",
+  "narrator_provider",
+  "azure_speech_key",
+  "azure_speech_region",
+  "email_section",
+  "send_weekly_summary",
   "defaults_section",
   "lines_per_turn",
   "silence_seconds",
@@ -59,6 +65,45 @@
    "fieldname": "claude_model",
    "fieldtype": "Data",
    "label": "Claude model"
+  },
+  {
+   "fieldname": "narrator_section",
+   "fieldtype": "Section Break",
+   "label": "Recorded narrator voice"
+  },
+  {
+   "default": "Device voice",
+   "description": "Device voice uses each tablet or computer's own voice. Azure Speech records a natural voice once per book, which every device then plays. Azure's free tier (F0) covers half a million characters a month.",
+   "fieldname": "narrator_provider",
+   "fieldtype": "Select",
+   "label": "Narrator",
+   "options": "Device voice\nAzure Speech"
+  },
+  {
+   "depends_on": "eval:doc.narrator_provider=='Azure Speech'",
+   "fieldname": "azure_speech_key",
+   "fieldtype": "Password",
+   "label": "Azure Speech key"
+  },
+  {
+   "default": "australiaeast",
+   "depends_on": "eval:doc.narrator_provider=='Azure Speech'",
+   "description": "The region of your Azure Speech resource, for example australiaeast.",
+   "fieldname": "azure_speech_region",
+   "fieldtype": "Data",
+   "label": "Azure Speech region"
+  },
+  {
+   "fieldname": "email_section",
+   "fieldtype": "Section Break",
+   "label": "Weekly email"
+  },
+  {
+   "default": "0",
+   "description": "Sent once a week to each family account that read during the week. Families can turn it off for themselves at /reading.",
+   "fieldname": "send_weekly_summary",
+   "fieldtype": "Check",
+   "label": "Email families a weekly reading summary"
   },
   {
    "fieldname": "defaults_section",
@@ -134,7 +179,7 @@
  ],
  "issingle": 1,
  "links": [],
- "modified": "2026-11-10 19:00:00.000000",
+ "modified": "2026-11-10 23:30:00.000000",
  "modified_by": "Administrator",
  "module": "ES Reading",
  "name": "ES Reading Settings",

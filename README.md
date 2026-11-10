@@ -81,6 +81,8 @@ and up to 20 tricky words with syllables and child-friendly meanings.
 - A scanned PDF with no text layer is transcribed by Claude instead (needs the API key).
 - To change what is read, open the **Reading Book** in the Desk and tick **Don't read** on any line,
   or edit the tricky words. **Re-scan** at `/reading` starts the preparation again from the PDF.
+- Each book's picture is page 1 of the PDF by default. Press **Picture** on a book to use your own image; it is
+  kept when the book is re-scanned, and **Use page 1 again** switches back.
 - PDFs are stored as public files under `/files`.
 
 ## How a session works

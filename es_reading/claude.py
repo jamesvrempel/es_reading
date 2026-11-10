@@ -112,13 +112,27 @@ def prepare_book(book):
 	lines = [line for line in doc.lines if (line.text or "").strip()]
 	if not lines or not is_configured():
 		return
-	numbered = "\n".join(f"{line.idx}: {line.text.strip()}" for line in lines)
+	title = doc.title
+	sent = [(line.idx, line.text.strip()) for line in lines]
+	numbered = "\n".join(f"{idx}: {text}" for idx, text in sent)
+
+	# The Claude call can take a minute. End the transaction first so the answer is applied to the
+	# record as it is afterwards, not to a stale snapshot (which fails if the book changed meanwhile).
+	frappe.db.commit()
 	try:
-		result = parse_json(call(PREPARE_SYSTEM, f"Title: {doc.title}\n\n{numbered}", max_tokens=4000, timeout=180))
+		result = parse_json(call(PREPARE_SYSTEM, f"Title: {title}\n\n{numbered}", max_tokens=4000, timeout=180))
 	except ClaudeError as e:
 		frappe.log_error(title="ES Reading: book preparation failed", message=str(e))
-		doc.db_set("note", str(e)[:500])
+		frappe.db.set_value("Reading Book", book, "note", str(e)[:500])
+		frappe.db.commit()
 		return
+
+	frappe.db.rollback()
+	if not frappe.db.exists("Reading Book", book):
+		return
+	doc = frappe.get_doc("Reading Book", book)
+	if [(line.idx, (line.text or "").strip()) for line in doc.lines if (line.text or "").strip()] != sent:
+		return  # the book was re-scanned while Claude was working; that scan queued its own preparation
 
 	skip = {cint(n) for n in result.get("skip_lines") or []}
 	for line in doc.lines:
@@ -139,6 +153,7 @@ def prepare_book(book):
 	doc.summary = (result.get("summary") or doc.summary or "")[:300]
 	doc.ai_prepared = 1
 	doc.note = ""
+	doc.flags.cover_from_scan = True
 	doc.save(ignore_permissions=True)
 	frappe.db.commit()
 
@@ -160,12 +175,20 @@ def extract_text(book):
 			{"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": pdf}},
 			{"type": "text", "text": "Transcribe this document."},
 		]
+		frappe.db.commit()  # don't hold a snapshot open across the long Claude call
 		result = parse_json(call(EXTRACT_SYSTEM, content, max_tokens=16000, timeout=600))
 	except Exception as e:
 		frappe.log_error(title="ES Reading: text extraction failed", message=frappe.get_traceback())
-		doc.db_set({"status": "Error", "note": str(e)[:500]})
+		frappe.db.rollback()
+		frappe.db.set_value("Reading Book", book, {"status": "Error", "note": str(e)[:500]})
 		frappe.db.commit()
 		return
+
+	frappe.db.rollback()
+	if not frappe.db.exists("Reading Book", book):
+		return
+	doc = frappe.get_doc("Reading Book", book)
+	doc.flags.cover_from_scan = True
 
 	doc.set("lines", [])
 	for page in result.get("pages") or []:

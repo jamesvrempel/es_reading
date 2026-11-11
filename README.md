@@ -80,6 +80,9 @@ summary, the lines that should not be read aloud (page numbers, name and score b
 and up to 20 tricky words with syllables and child-friendly meanings.
 
 - A scanned PDF with no text layer is transcribed by Claude instead (needs the API key).
+- A book can also be made in the Desk: create a **Reading Book**, attach the PDF, save, and press
+  **Scan the PDF** at the top of the form. The status is set by the app; a book with no scanned text is
+  never Ready, so it stays out of the family library until it has been scanned.
 - To change what is read, open the **Reading Book** in the Desk and tick **Don't read** on any line,
   or edit the tricky words. **Re-scan** at `/reading` starts the preparation again from the PDF.
 - Each book's picture is page 1 of the PDF by default. Press **Picture** on a book to use your own image; it is

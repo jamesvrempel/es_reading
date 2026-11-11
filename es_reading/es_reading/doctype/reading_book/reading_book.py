@@ -16,6 +16,9 @@ class ReadingBook(Document):
 		self.page_count = self.page_count or max([line.page_no or 0 for line in self.lines] or [0])
 		self.line_count = len(readable)
 		self.word_count = sum(len((line.text or "").split()) for line in readable)
+		# A book with nothing to read is not ready, whatever the status was set to by hand.
+		if self.status == "Ready" and not self.line_count:
+			self.status = "Uploaded"
 
 
 def skipped_pages(value):

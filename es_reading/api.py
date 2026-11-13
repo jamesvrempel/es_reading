@@ -25,7 +25,7 @@ from es_reading.install import DEFAULTS
 
 LIBRARIAN_ROLES = {"System Manager", "Reading Librarian"}
 TEACHER_ROLES = {"System Manager", "Reading Teacher"}
-MODES = ("Read Together", "Re-read", "Tricky Words", "Listen")
+MODES = ("Read Together", "Re-read", "Tricky Words", "Listen", "Questions")
 COUNTRIES = (
 	"Australia",
 	"United Kingdom",
@@ -171,7 +171,7 @@ def _readers():
 
 def _books():
 	filters = {} if _is_librarian() else {"status": "Ready", "published": 1}
-	return frappe.get_all(
+	books = frappe.get_all(
 		"Reading Book",
 		filters=filters,
 		fields=[
@@ -193,6 +193,12 @@ def _books():
 		],
 		order_by="title asc",
 	)
+	counts = {}
+	for parent in frappe.get_all("Reading Book Question", filters={"parenttype": "Reading Book"}, pluck="parent"):
+		counts[parent] = counts.get(parent, 0) + 1
+	for book in books:
+		book["question_count"] = counts.get(book.name, 0)
+	return books
 
 
 def _clamp(value, low, high, default=None):

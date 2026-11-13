@@ -151,7 +151,8 @@ and single words said as help, are read by the device's voice. Only the book's t
 ## Questions, recordings, classes and email
 
 - **Questions about the story**: Claude writes four multiple-choice questions when it prepares a book, and
-  they can be edited on the Reading Book in the Desk. After reading, the results page offers them.
+  they can be edited on the Reading Book in the Desk. A book with questions shows them on its library card
+  and in its menu, where they can be taken on their own; the results page offers them after reading or listening.
 - **Hear yourself read** (per reader, off by default): each turn is recorded in the browser and can be
   played back on the results page. Recordings are never uploaded and are discarded on leaving that page.
 - **Classes**: give a teacher the **Reading Teacher** role. At `/reading` they make a class, share its

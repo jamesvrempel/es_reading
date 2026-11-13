@@ -27,6 +27,7 @@
 		"Listen": "Just listen",
 		"Tricky Words": "Tricky words",
 		"Questions": "Questions about the story",
+		"Practice Test": "Practice test",
 	};
 
 	const S = {
@@ -811,7 +812,7 @@
 		S.boot.books = books;
 		S.progress = progress;
 		S.filter = S.filter || { text: "", shelf: "" };
-		const readBooks = new Set(progress.filter((p) => p.mode === "Read Together" || p.mode === "Re-read").map((p) => p.book));
+		const readBooks = new Set(progress.filter((p) => p.mode === "Read Together" || p.mode === "Re-read" || p.mode === "Practice Test").map((p) => p.book));
 		const lib = S.boot.is_librarian;
 		const stats = readerStats();
 		const shelves = [...new Set(books.map((b) => (b.shelf || "").trim()).filter(Boolean))].sort((x, y) => x.localeCompare(y));
@@ -1175,28 +1176,87 @@
 		viewQuiz(session && session.name, true);
 	}
 
-	function viewQuiz(session, standalone) {
+	/** The whole story as plain paragraphs, one for each page, for reading silently. */
+	function passage() {
+		const pages = [];
+		S.book.lines.forEach((line) => {
+			const last = pages[pages.length - 1];
+			if (last && last.page === line.page) last.text += " " + line.text;
+			else pages.push({ page: line.page, text: line.text });
+		});
+		return h("div", { class: "text passage" }, pages.map((pg) => h("p", {}, pg.text)));
+	}
+
+	/** Practice test: read the story silently, then answer the questions for a score. */
+	async function beginPractice() {
+		const session = await guard(() => api("start_session", { reader: S.reader.name, book: S.book.name, mode: "Practice Test" }, true));
 		leaveRun();
 		const began = performance.now();
-		const questions = S.book.questions.slice(0, 6);
+		const words = S.book.lines.reduce((n, line) => n + line.text.split(/\s+/).filter(Boolean).length, 0);
+		const timer = h("span", { class: "meta", "aria-hidden": "true" }, "⏱ 0:00");
+		const tick = setInterval(() => {
+			if (!timer.isConnected) return clearInterval(tick);
+			timer.textContent = "⏱ " + clock((performance.now() - began) / 1000);
+		}, 1000);
+		show(
+			h("div", { class: "bar" }, h("button", { class: "btn icon-btn", "aria-label": "Back to the library", onclick: () => guard(viewLibrary) }, "✕"),
+				h("h1", {}, "Practice test"), timer),
+			h("div", { class: "page" }, h("div", { class: "panel practice" },
+				h("p", { class: "meta lead" }, "Read this quietly to yourself. Take your time. When you have finished, answer the questions."),
+				h("h2", {}, S.book.title),
+				passage(),
+				h("div", { class: "controls" }, h("span", { class: "spacer" }),
+					h("button", { class: "btn primary big", onclick: () => {
+						clearInterval(tick);
+						viewQuiz(session && session.name, true, { seconds: (performance.now() - began) / 1000, words });
+					} }, "I've finished reading ➜"))))
+		);
+	}
+
+	function viewQuiz(session, standalone, test) {
+		leaveRun();
+		const began = performance.now();
+		const questions = S.book.questions.slice(0, test ? 12 : 6);
+		const picked = [];
 		let at = 0;
 		let right = 0;
 		const stage = h("div", { class: "result quiz" });
 		const meter = h("i");
 		show(
 			h("div", { class: "bar" }, h("button", { class: "btn icon-btn", "aria-label": "Back to the library", onclick: () => guard(viewLibrary) }, "✕"),
-				h("h1", {}, "Questions about the story"), h("div", { class: "meter" }, meter)),
+				h("h1", {}, test ? "Practice test" : "Questions about the story"), h("div", { class: "meter" }, meter)),
 			h("div", { class: "page" }, stage)
 		);
 		const done = () => {
 			hush();
+			meter.style.width = "100%";
+			// Clicking straight through is not reading: only count a speed a child could really read at.
+			if (test && !(test.seconds > 0 && (test.words / test.seconds) * 60 <= 500)) test.words = 0;
 			if (session) {
 				api("save_quiz", { session, correct: right, total: questions.length }, true)
 					// Taken on its own, the quiz is a session of its own: finish it so it shows in Progress.
-					.then(() => standalone && api("finish_session", { session, data: JSON.stringify({ reader_seconds: (performance.now() - began) / 1000, narrator_seconds: 0, words_total: 0, helped_words: [] }) }, true))
+					.then(() => standalone && api("finish_session", { session, data: JSON.stringify({ reader_seconds: test ? test.seconds : (performance.now() - began) / 1000, narrator_seconds: 0, words_total: test ? test.words : 0, helped_words: [] }) }, true))
 					.catch(() => {});
 			}
 			if (right === questions.length) cheer("🎉");
+			if (test) {
+				const wpm = test.seconds > 0 ? Math.round((test.words / test.seconds) * 60) : 0;
+				stage.replaceChildren(
+					h("div", { class: "hero" }, h("div", { class: "stars" }, right === questions.length ? "📝⭐" : "📝"),
+						h("h2", {}, `Your score: ${right} out of ${questions.length}`),
+						h("p", {}, wpm ? `You read ${test.words} words in ${clock(test.seconds)} (about ${wpm} words a minute).` : `Reading time: ${clock(test.seconds)}.`)),
+					h("div", { class: "review" }, questions.map((q, i) => {
+						const ok = picked[i] === q.answer;
+						return h("div", { class: "review-row " + (ok ? "ok" : "miss") },
+							h("b", {}, `${ok ? "✓" : "✗"} ${i + 1}. ${q.question}`),
+							h("div", {}, "Your answer: ", q.options[picked[i]]),
+							!ok && h("div", { class: "fix" }, "Right answer: ", q.options[q.answer]));
+					})),
+					h("div", { class: "options modes" },
+						h("button", { class: "btn primary", onclick: () => guard(beginPractice) }, "📝 Try the practice test again"),
+						h("button", { class: "btn", onclick: () => guard(viewLibrary) }, "📚 Back to the library")));
+				return;
+			}
 			stage.replaceChildren(
 				h("div", { class: "hero" }, h("div", { class: "stars" }, right === questions.length ? "🤔⭐" : "🤔"),
 					h("h2", {}, `You got ${right} of ${questions.length} right!`),
@@ -1208,8 +1268,20 @@
 			const q = questions[at];
 			meter.style.width = Math.round((at / questions.length) * 100) + "%";
 			const read = () => { hush(); speak(`${q.question} ... ${q.options.join(". ... ")}.`); };
-			const next = h("button", { class: "btn primary big", hidden: true, onclick: () => { at++; ask(); } }, at + 1 === questions.length ? "Finish ➜" : "Next ➜");
+			const next = h("button", { class: "btn primary big", hidden: true, onclick: () => {
+				if (test && picked[at] === q.answer) right++;
+				hush();
+				at++;
+				ask();
+			} }, at + 1 === questions.length ? "Finish ➜" : "Next ➜");
 			const options = q.options.map((option, i) => h("button", { class: "btn big option", onclick: () => {
+				if (test) {
+					// A test: the answer can be changed until Next is pressed, and marks come at the end.
+					picked[at] = i;
+					options.forEach((btn, j) => btn.classList.toggle("chosen", j === i));
+					next.hidden = false;
+					return;
+				}
 				if (!next.hidden) return;
 				hush();
 				const ok = i === q.answer;
@@ -1221,8 +1293,10 @@
 				h("p", { class: "meta" }, `Question ${at + 1} of ${questions.length}`),
 				h("h2", { class: "question" }, q.question),
 				h("div", { class: "options modes" }, options),
-				h("div", { class: "controls", style: "justify-content:center;border:0" }, h("button", { class: "btn", onclick: read }, "🔊 Read it to me"), next));
-			read();
+				h("div", { class: "controls", style: "justify-content:center;border:0" }, h("button", { class: "btn", onclick: read }, "🔊 Read it to me"),
+					test && h("button", { class: "btn", onclick: () => modal(S.book.title, passage(), (close) => [h("button", { class: "btn primary", onclick: close }, "Back to the question")], true) }, "📖 Look at the story again"),
+					next));
+			if (!test) read();
 		};
 		ask();
 	}
@@ -1266,7 +1340,8 @@
 					pick("Re-read", "", "📖", "I'll read it myself", "Read aloud with help when you get stuck."),
 					pick("Tricky Words", "", "🧩", "Tricky words", "Practise the long and difficult words."),
 					pick("Listen", "", "👂", "Just listen", "Hear the whole story read aloud."),
-					(book.questions || []).length > 0 && pick("Questions", "", "❓", "Questions about the story", `${Math.min(book.questions.length, 6)} quick questions to check what you remember.`))),
+					(book.questions || []).length > 0 && pick("Questions", "", "❓", "Questions about the story", `${Math.min(book.questions.length, 6)} quick questions to check what you remember.`),
+					(book.questions || []).length > 0 && h("button", { class: "btn", onclick: () => { close(); beginPractice(); } }, h("span", { style: "font-size:28px" }, "📝"), h("span", {}, "Practice test", h("small", {}, "Read it quietly to yourself, then answer the questions for a score."))))),
 				(c) => [h("button", { class: "btn", onclick: c }, "Back")]);
 		});
 	}

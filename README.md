@@ -153,6 +153,11 @@ and single words said as help, are read by the device's voice. Only the book's t
 - **Questions about the story**: Claude writes four multiple-choice questions when it prepares a book, and
   they can be edited on the Reading Book in the Desk. A book with questions shows them on its library card
   and in its menu, where they can be taken on their own; the results page offers them after reading or listening.
+- **Practice test**: a book with questions also offers a practice test in its menu. The reader reads the
+  whole story silently, then answers the questions (up to twelve) without being told the answers as they go,
+  and can look back at the story. The score, the reading time and a review of each answer come at the end.
+  Shelves such as "Year 3 practice" and "Year 5 practice" are ordinary shelves: put short passages with
+  questions on them. Use your own or licensed passages, not published test papers.
 - **Hear yourself read** (per reader, off by default): each turn is recorded in the browser and can be
   played back on the results page. Recordings are never uploaded and are discarded on leaving that page.
 - **Classes**: give a teacher the **Reading Teacher** role. At `/reading` they make a class, share its

@@ -26,6 +26,7 @@
 		"Re-read": "I'll read it myself",
 		"Listen": "Just listen",
 		"Tricky Words": "Tricky words",
+		"Questions": "Questions about the story",
 	};
 
 	const S = {
@@ -810,7 +811,7 @@
 		S.boot.books = books;
 		S.progress = progress;
 		S.filter = S.filter || { text: "", shelf: "" };
-		const readBooks = new Set(progress.filter((p) => p.mode !== "Listen" && p.mode !== "Tricky Words").map((p) => p.book));
+		const readBooks = new Set(progress.filter((p) => p.mode === "Read Together" || p.mode === "Re-read").map((p) => p.book));
 		const lib = S.boot.is_librarian;
 		const stats = readerStats();
 		const shelves = [...new Set(books.map((b) => (b.shelf || "").trim()).filter(Boolean))].sort((x, y) => x.localeCompare(y));
@@ -825,6 +826,7 @@
 			const meta = [b.reading_level, b.word_count ? `${b.word_count} words` : ""].filter(Boolean).join(" · ");
 			const kids = [cover, h("span", { class: "title" }, b.title), meta && h("span", { class: "meta" }, meta),
 				assigned.has(b.name) && h("span", { class: "fit class" }, "From your class"),
+				b.question_count > 0 && h("span", { class: "fit" }, `❓ ${Math.min(b.question_count, 6)} questions`),
 				fit === "right" && h("span", { class: "fit right" }, "Just right for you"),
 				fit === "stretch" && h("span", { class: "fit" }, "A challenge"),
 				readBooks.has(b.name) && h("span", { class: "tick", title: "Read" }, "✓")];
@@ -1167,8 +1169,15 @@
 
 	// ------------------------------------------------------------------ questions about the story
 
-	function viewQuiz(session) {
+	/** Take the questions straight from the book's menu, without reading first. */
+	async function beginQuiz() {
+		const session = await guard(() => api("start_session", { reader: S.reader.name, book: S.book.name, mode: "Questions" }, true));
+		viewQuiz(session && session.name, true);
+	}
+
+	function viewQuiz(session, standalone) {
 		leaveRun();
+		const began = performance.now();
 		const questions = S.book.questions.slice(0, 6);
 		let at = 0;
 		let right = 0;
@@ -1181,7 +1190,12 @@
 		);
 		const done = () => {
 			hush();
-			if (session) api("save_quiz", { session, correct: right, total: questions.length }, true).catch(() => {});
+			if (session) {
+				api("save_quiz", { session, correct: right, total: questions.length }, true)
+					// Taken on its own, the quiz is a session of its own: finish it so it shows in Progress.
+					.then(() => standalone && api("finish_session", { session, data: JSON.stringify({ reader_seconds: (performance.now() - began) / 1000, narrator_seconds: 0, words_total: 0, helped_words: [] }) }, true))
+					.catch(() => {});
+			}
 			if (right === questions.length) cheer("🎉");
 			stage.replaceChildren(
 				h("div", { class: "hero" }, h("div", { class: "stars" }, right === questions.length ? "🤔⭐" : "🤔"),
@@ -1219,7 +1233,7 @@
 		const reads = stats.reads.filter((p) => p.reader_wpm > 0).slice(0, 20).reverse();
 		const rows = S.progress.slice(0, 15).map((p) => h("tr", {},
 			h("td", {}, String(p.completed_on || "").slice(0, 10)),
-			h("td", {}, h("b", {}, p.book_title), h("br"), MODE_LABEL[p.mode] || p.mode),
+			h("td", {}, h("b", {}, p.book_title), h("br"), MODE_LABEL[p.mode] || p.mode, p.quiz_total ? h("div", { class: "meta" }, `Questions: ${p.quiz_correct} of ${p.quiz_total} right`) : null),
 			h("td", {}, p.reader_seconds ? clock(p.reader_seconds) : "–", p.reader_wpm ? h("div", { class: "meta" }, `${Math.round(p.reader_wpm)} words/min`) : null),
 			h("td", {}, p.words_helped ? `${p.words_helped}: ${p.helped_words}` : "none")));
 		const body = h("div", {},
@@ -1251,7 +1265,8 @@
 					pick("Read Together", resume ? "primary" : "primary big", "👂🎤", resume ? "Start again: read together" : "Read together", "Listen to a few lines, then read them back."),
 					pick("Re-read", "", "📖", "I'll read it myself", "Read aloud with help when you get stuck."),
 					pick("Tricky Words", "", "🧩", "Tricky words", "Practise the long and difficult words."),
-					pick("Listen", "", "👂", "Just listen", "Hear the whole story read aloud."))),
+					pick("Listen", "", "👂", "Just listen", "Hear the whole story read aloud."),
+					(book.questions || []).length > 0 && pick("Questions", "", "❓", "Questions about the story", `${Math.min(book.questions.length, 6)} quick questions to check what you remember.`))),
 				(c) => [h("button", { class: "btn", onclick: c }, "Back")]);
 		});
 	}
@@ -1349,6 +1364,7 @@
 		leaveRun();
 		beep(660, 60); // unlock audio inside the tap that started the run
 		if (mode === "Tricky Words") return beginTricky();
+		if (mode === "Questions") return beginQuiz();
 		const run = (S.run = {
 			mode,
 			chunks: buildChunks(S.book.lines, pref("lines_per_turn")),
@@ -1815,7 +1831,7 @@
 		const stars = run.mode === "Listen" ? 0 : share <= 0.02 ? 3 : share <= 0.08 ? 2 : 1;
 		const feedback = h("div", { class: "feedback" }, "…");
 		const newBadges = h("div", { class: "badges new", hidden: true });
-		const canQuiz = run.mode !== "Listen" && (S.book.questions || []).length > 0;
+		const canQuiz = (S.book.questions || []).length > 0;
 		const recordings = (S.recordings || []).length
 			? h("div", { class: "recordings" }, h("h3", {}, "🎧 Hear yourself read"), S.recordings.map((r) => h("div", { class: "recording" }, h("span", {}, r.label), h("audio", { controls: true, src: r.url, preload: "metadata" }))))
 			: null;

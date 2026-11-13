@@ -61,7 +61,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Mode",
-   "options": "Read Together\nRe-read\nTricky Words\nListen\nQuestions"
+   "options": "Read Together\nRe-read\nTricky Words\nListen\nQuestions\nPractice Test"
   },
   {
    "default": "In Progress",
@@ -173,7 +173,7 @@
   }
  ],
  "links": [],
- "modified": "2026-11-13 13:00:00.000000",
+ "modified": "2026-11-13 14:00:00.000000",
  "modified_by": "Administrator",
  "module": "ES Reading",
  "name": "Reading Session",

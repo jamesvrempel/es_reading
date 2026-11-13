@@ -253,3 +253,14 @@ body[data-bg="dark"] .panel .controls { border-top-color: #33424a; }
 .joincode b { font-size: 34px; letter-spacing: .18em; font-variant-numeric: tabular-nums; }
 .joincode small { color: var(--ink-soft); }
 .card .fit.class { background: var(--sun-soft); border-color: var(--sun); color: var(--ink); }
+
+/* ---------- practice test ---------- */
+.practice { display: block; max-width: 860px; margin: 0 auto; border-radius: 18px; padding: 18px 0 0; }
+.practice h2, .practice .lead { padding: 0 22px; margin: 0 0 8px; }
+.practice .text { overflow: visible; }
+.passage p { margin: 0 0 .9em; }
+.quiz .option.chosen { background: #e2f3f1; border-color: var(--teal); color: var(--teal-dark); }
+.review { text-align: left; margin: 0 0 18px; display: grid; gap: 10px; }
+.review-row { background: var(--card); border: 2px solid var(--line); border-left: 8px solid #2f9e5b; border-radius: 12px; padding: 10px 14px; }
+.review-row.miss { border-left-color: var(--coral); }
+.review-row .fix { color: #1d6b3d; font-weight: 700; }

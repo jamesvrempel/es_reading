@@ -25,7 +25,7 @@ from es_reading.install import DEFAULTS
 
 LIBRARIAN_ROLES = {"System Manager", "Reading Librarian"}
 TEACHER_ROLES = {"System Manager", "Reading Teacher"}
-MODES = ("Read Together", "Re-read", "Tricky Words", "Listen", "Questions")
+MODES = ("Read Together", "Re-read", "Tricky Words", "Listen", "Questions", "Practice Test")
 COUNTRIES = (
 	"Australia",
 	"United Kingdom",
